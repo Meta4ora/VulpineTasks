@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="AppTheme" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">#2196F3</item>
+        <item name="colorPrimaryVariant">#1976D2</item>
+        <item name="colorOnPrimary">@android:color/white</item>
+        <item name="colorSecondary">#03DAC5</item>
+        <item name="colorSecondaryVariant">#018786</item>
+        <item name="colorOnSecondary">@android:color/black</item>
+        <item name="android:windowBackground">#E8F4FD</item>
+    </style>
+
+    <style name="AppTheme.NavigationView" parent="Theme.MaterialComponents.DayNight">
+        <item name="android:background">@android:color/white</item>
+    </style>
+
+    <style name="BlueChip" parent="Widget.MaterialComponents.Chip.Choice">
+        <item name="chipBackgroundColor">#E3F2FD</item>
+        <item name="android:textColor">#1976D2</item>
+        <item name="chipCornerRadius">20dp</item>
+    </style>
+</resources>
