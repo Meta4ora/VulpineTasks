@@ -211,7 +211,6 @@
             android:layout_height="wrap_content"
             android:layout_margin="24dp"
             android:src="@drawable/ic_add"
-            app:backgroundTint="#2196F3"
             app:tint="@android:color/white"
             app:layout_constraintBottom_toBottomOf="parent"
             app:layout_constraintEnd_toEndOf="parent" />
