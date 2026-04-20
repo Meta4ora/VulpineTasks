@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <group android:checkableBehavior="single">
+        <item
+            android:id="@+id/nav_all_notes"
+            android:icon="@drawable/ic_more_vert"
+            android:title="Все заметки" />
+        <item
+            android:id="@+id/nav_favorites"
+            android:icon="@drawable/ic_more_vert"
+            android:title="Избранное" />
+        <item
+            android:id="@+id/nav_trash"
+            android:icon="@drawable/ic_more_vert"
+            android:title="Корзина" />
+        <item
+            android:id="@+id/nav_settings"
+            android:icon="@drawable/ic_more_vert"
+            android:title="Настройки" />
+        <item
+            android:id="@+id/nav_login"
+            android:title="Войти / Регистрация" />
+
+        <item
+            android:id="@+id/nav_guest"
+            android:title="Войти как гость" />
+    </group>
+</menu>
