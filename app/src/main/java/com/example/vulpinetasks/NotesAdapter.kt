@@ -1,53 +1,60 @@
 package com.example.vulpinetasks
 
-import android.view.*
-import android.widget.TextView
+import android.view.LayoutInflater
+import android.view.View
+import android.view.ViewGroup
+import android.widget.PopupMenu
+import androidx.recyclerview.widget.DiffUtil
+import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
 import com.example.vulpinetasks.backend.NoteDto
+import com.example.vulpinetasks.databinding.ItemNoteBinding
 
 class NotesAdapter(
-    private var notes: List<NoteDto>,
-    private val onClick: (NoteDto) -> Unit
-) : RecyclerView.Adapter<NotesAdapter.VH>() {
+    private val onOpen: (NoteDto) -> Unit,
+    private val onTrash: (NoteDto) -> Unit
+) : ListAdapter<NoteDto, NotesAdapter.VH>(Diff) {
 
-    fun updateNotes(newNotes: List<NoteDto>) {
-        notes = newNotes
-        notifyDataSetChanged()
+    object Diff : DiffUtil.ItemCallback<NoteDto>() {
+        override fun areItemsTheSame(a: NoteDto, b: NoteDto) = a.id == b.id
+        override fun areContentsTheSame(a: NoteDto, b: NoteDto) = a == b
+    }
+
+    inner class VH(private val b: ItemNoteBinding) :
+        RecyclerView.ViewHolder(b.root) {
+
+        fun bind(note: NoteDto) {
+            b.noteTitle.text = note.title
+            b.notePreview.text = note.type
+
+            b.root.setOnClickListener {
+                onOpen(note)
+            }
+
+            b.noteMenuButton.setOnClickListener { v: View ->
+                val popup = PopupMenu(v.context, v)
+                popup.menu.add("В корзину")
+
+                popup.setOnMenuItemClickListener {
+                    onTrash(note)
+                    true
+                }
+
+                popup.show()
+            }
+        }
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
-        val view = LayoutInflater.from(parent.context)
-            .inflate(R.layout.item_note, parent, false)
-        return VH(view)
+        val binding = ItemNoteBinding.inflate(
+            LayoutInflater.from(parent.context),
+            parent,
+            false
+        )
+        return VH(binding)
     }
 
     override fun onBindViewHolder(holder: VH, position: Int) {
-        holder.bind(notes[position])
-    }
-
-    override fun getItemCount() = notes.size
-
-    inner class VH(itemView: View) : RecyclerView.ViewHolder(itemView) {
-
-        private val icon = itemView.findViewById<TextView>(R.id.type_icon)
-        private val title = itemView.findViewById<TextView>(R.id.note_title)
-        private val preview = itemView.findViewById<TextView>(R.id.note_preview)
-        private val date = itemView.findViewById<TextView>(R.id.date_text)
-
-        fun bind(note: NoteDto) {
-
-            icon.text = when (note.type) {
-                "task" -> "✅"
-                else -> "📝"
-            }
-
-            title.text = note.title
-            preview.text = note.type
-            date.text = note.createdAt.toString()
-
-            itemView.setOnClickListener {
-                onClick(note)
-            }
-        }
+        holder.bind(getItem(position))
     }
 }

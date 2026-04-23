@@ -48,4 +48,10 @@ interface ApiService {
         @Path("id") id: String,
         @Header("Authorization") token: String
     ): NoteDto
+
+    @DELETE("notes/{id}")
+    suspend fun deleteNote(
+        @Path("id") id: String,
+        @Header("Authorization") token: String
+    )
 }

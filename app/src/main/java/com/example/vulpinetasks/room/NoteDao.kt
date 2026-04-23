@@ -6,18 +6,38 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface NoteDao {
 
-    @Query("SELECT * FROM notes WHERE userId = :userId ORDER BY updatedAt DESC")
+    @Query("""
+        SELECT * FROM notes 
+        WHERE userId = :userId AND isDeleted = 0
+        ORDER BY updatedAt DESC
+    """)
     fun getNotes(userId: String): Flow<List<NoteEntity>>
+
+    @Query("""
+        SELECT * FROM notes 
+        WHERE userId = :userId AND isDeleted = 1
+        ORDER BY updatedAt DESC
+    """)
+    fun getTrash(userId: String): Flow<List<NoteEntity>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(note: NoteEntity)
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertAll(notes: List<NoteEntity>)
+    suspend fun insertAll(list: List<NoteEntity>)
 
-    @Query("DELETE FROM notes WHERE id = :id AND userId = :userId")
-    suspend fun delete(id: String, userId: String)
+    @Query("DELETE FROM notes WHERE userId = :userId")
+    suspend fun clearAll(userId: String)
 
-    @Query("SELECT * FROM notes WHERE isSynced = 0 AND userId = :userId")
-    suspend fun getUnsynced(userId: String): List<NoteEntity>
+    @Query("UPDATE notes SET isDeleted = 1 WHERE id = :id")
+    suspend fun moveToTrash(id: String)
+
+    @Query("UPDATE notes SET isDeleted = 0, updatedAt = :time WHERE id = :id")
+    suspend fun restore(id: String, time: Long)
+
+    @Query("DELETE FROM notes WHERE id = :id")
+    suspend fun delete(id: String)
+
+    @Query("SELECT * FROM notes WHERE userId = :userId")
+    suspend fun getAllOnce(userId: String): List<NoteEntity>
 }

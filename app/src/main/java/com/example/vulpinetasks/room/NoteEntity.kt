@@ -10,5 +10,6 @@ data class NoteEntity(
     val title: String,
     val type: String,
     val updatedAt: Long,
-    val isSynced: Boolean = false
+    val isSynced: Boolean = false,
+    val isDeleted: Boolean = false
 )

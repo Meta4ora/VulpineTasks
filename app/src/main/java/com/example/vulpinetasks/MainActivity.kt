@@ -2,7 +2,9 @@ package com.example.vulpinetasks
 
 import android.content.Intent
 import android.os.Bundle
+import android.widget.EditText
 import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.GravityCompat
 import androidx.lifecycle.lifecycleScope
@@ -10,16 +12,17 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import com.example.vulpinetasks.backend.TokenManager
 import com.example.vulpinetasks.databinding.ActivityMainBinding
 import com.example.vulpinetasks.room.AppGraph
+import com.example.vulpinetasks.util.NetworkUtil
 import kotlinx.coroutines.launch
 
 class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
     private lateinit var adapter: NotesAdapter
-
-    private val repo = AppGraph.notesRepository
-    private lateinit var userId: String
     private lateinit var tokenManager: TokenManager
+
+    private val repo get() = AppGraph.notesRepository
+    private lateinit var userId: String
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -29,18 +32,61 @@ class MainActivity : AppCompatActivity() {
 
         tokenManager = TokenManager(this)
 
-        userId = tokenManager.getUserId() ?: run {
-            startActivity(Intent(this, LoginActivity::class.java))
-            finish()
-            return
-        }
+        userId = tokenManager.getUserId()
+            ?: "guest_${System.currentTimeMillis()}"
+
+        tokenManager.saveUserId(userId)
 
         setupRecycler()
         observeNotes()
         setupDrawer()
 
         lifecycleScope.launch {
-            repo.fetchNotesFromServer(userId)
+            repo.fetchFromServer(userId)
+        }
+
+        binding.addNoteButton.setOnClickListener {
+            showCreateDialog()
+        }
+    }
+
+    private fun setupRecycler() {
+        adapter = NotesAdapter(
+            onOpen = {
+                toast("Open: ${it.title}")
+            },
+            onTrash = {
+                lifecycleScope.launch {
+                    repo.moveToTrash(it)
+                }
+            }
+        )
+
+        binding.notesRecyclerView.layoutManager =
+            LinearLayoutManager(this)
+        binding.notesRecyclerView.adapter = adapter
+    }
+
+    private fun observeNotes() {
+        lifecycleScope.launch {
+            repo.observeNotes(userId).collect {
+                adapter.submitList(it)
+            }
+        }
+    }
+
+    private fun setupDrawer() {
+        binding.navView.setNavigationItemSelectedListener { item ->
+            when (item.itemId) {
+                R.id.nav_login -> {
+                    startActivity(Intent(this, LoginActivity::class.java))
+                }
+                R.id.nav_trash -> {
+                    startActivity(Intent(this, TrashActivity::class.java))
+                }
+            }
+            binding.drawerLayout.closeDrawer(GravityCompat.START)
+            true
         }
 
         binding.menuButton.setOnClickListener {
@@ -48,81 +94,27 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    override fun onStart() {
-        super.onStart()
-
-        lifecycleScope.launch {
-            repo.syncAll(userId)
-        }
-    }
-
-    private fun observeNotes() {
-        lifecycleScope.launch {
-            repo.getNotes(userId).collect { list ->
-                adapter.updateNotes(
-                    list.map {
-                        com.example.vulpinetasks.backend.NoteDto(
-                            id = it.id,
-                            userId = it.userId,
-                            title = it.title,
-                            type = it.type,
-                            parentId = null,
-                            filePath = "",
-                            createdAt = it.updatedAt,
-                            updatedAt = it.updatedAt
-                        )
-                    }
-                )
-            }
-        }
-    }
-
-    private fun setupRecycler() {
-        adapter = NotesAdapter(emptyList()) {}
-
-        binding.notesRecyclerView.layoutManager =
-            LinearLayoutManager(this)
-
-        binding.notesRecyclerView.adapter = adapter
-    }
-
     private fun showCreateDialog() {
-        val input = android.widget.EditText(this)
+        val input = EditText(this)
 
-        androidx.appcompat.app.AlertDialog.Builder(this)
+        AlertDialog.Builder(this)
             .setTitle("Новая заметка")
             .setView(input)
             .setPositiveButton("Создать") { _, _ ->
+                val text = input.text.toString().trim()
+                if (text.isEmpty()) return@setPositiveButton
+
                 lifecycleScope.launch {
                     repo.createNote(
-                        input.text.toString(),
+                        text,
                         "note",
-                        userId
+                        userId,
+                        NetworkUtil.isOnline(this@MainActivity)
                     )
                 }
             }
+            .setNegativeButton("Отмена", null)
             .show()
-    }
-
-    private fun setupDrawer() {
-        binding.navView.setNavigationItemSelectedListener { item ->
-
-            when (item.itemId) {
-
-                R.id.nav_login -> {
-                    startActivity(Intent(this, LoginActivity::class.java))
-                }
-
-                R.id.nav_guest -> {
-                    tokenManager.clear()
-                    startActivity(Intent(this, LoginActivity::class.java))
-                    finish()
-                }
-            }
-
-            binding.drawerLayout.closeDrawer(GravityCompat.START)
-            true
-        }
     }
 
     private fun toast(msg: String) {
