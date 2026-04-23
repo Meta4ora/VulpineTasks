@@ -13,6 +13,8 @@ class TokenManager(private val context: Context) {
         private const val KEY_USER_ID = "user_id"
         private const val KEY_EMAIL = "user_email"
         private const val KEY_IS_GUEST = "is_guest"
+        private const val KEY_GUEST_USER_ID = "guest_user_id"
+        private const val KEY_LAST_LOGGED_USER_ID = "last_logged_user_id"
     }
 
     fun saveToken(token: String) {
@@ -25,10 +27,21 @@ class TokenManager(private val context: Context) {
 
     fun saveUserId(userId: String) {
         prefs.edit().putString(KEY_USER_ID, userId).apply()
+        // Сохраняем как последнего залогиненного пользователя
+        if (!isGuest()) {
+            prefs.edit().putString(KEY_LAST_LOGGED_USER_ID, userId).apply()
+        }
     }
 
     fun getUserId(): String? {
+        if (isGuest()) {
+            return getGuestUserId()
+        }
         return prefs.getString(KEY_USER_ID, null)
+    }
+
+    fun getLastLoggedUserId(): String? {
+        return prefs.getString(KEY_LAST_LOGGED_USER_ID, null)
     }
 
     fun saveEmail(email: String) {
@@ -47,7 +60,19 @@ class TokenManager(private val context: Context) {
         return prefs.getBoolean(KEY_IS_GUEST, true)
     }
 
+    fun getGuestUserId(): String {
+        var guestId = prefs.getString(KEY_GUEST_USER_ID, null)
+        if (guestId == null) {
+            guestId = "guest_${System.currentTimeMillis()}"
+            prefs.edit().putString(KEY_GUEST_USER_ID, guestId).apply()
+        }
+        return guestId
+    }
+
     fun logout() {
+        val guestId = getGuestUserId()
         prefs.edit().clear().apply()
+        prefs.edit().putString(KEY_GUEST_USER_ID, guestId).apply()
+        setGuestMode(true)
     }
 }

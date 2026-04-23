@@ -25,10 +25,6 @@ class MainActivity : AppCompatActivity() {
     private val repo get() = AppGraph.notesRepository
     private lateinit var userId: String
 
-    companion object {
-        private const val TAG = "VULPINE_MAIN"
-    }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -36,20 +32,18 @@ class MainActivity : AppCompatActivity() {
         setContentView(binding.root)
 
         tokenManager = TokenManager(this)
-
-        userId = tokenManager.getUserId()
-            ?: "guest_${System.currentTimeMillis()}"
-
+        userId = tokenManager.getUserId() ?: "guest_${System.currentTimeMillis()}"
         tokenManager.saveUserId(userId)
-
-        Log.d(TAG, "MainActivity created userId=$userId")
 
         setupRecycler()
         observeNotes()
         setupDrawer()
 
-        lifecycleScope.launch {
-            repo.fetchFromServer(userId)
+        // Загружаем с сервера только если не гость
+        if (!tokenManager.isGuest()) {
+            lifecycleScope.launch {
+                repo.fetchFromServer(userId)
+            }
         }
 
         binding.addNoteButton.setOnClickListener {
@@ -58,8 +52,13 @@ class MainActivity : AppCompatActivity() {
 
         binding.syncButton.setOnClickListener {
             lifecycleScope.launch {
-                repo.syncAll(userId)
-                toast("Синхронизация завершена")
+                if (tokenManager.isGuest()) {
+                    toast("Синхронизация недоступна в гостевом режиме")
+                } else {
+                    repo.syncUnsyncedNotes(userId)
+                    repo.fetchFromServer(userId)
+                    toast("Синхронизация завершена")
+                }
             }
         }
     }
@@ -84,7 +83,6 @@ class MainActivity : AppCompatActivity() {
     private fun observeNotes() {
         lifecycleScope.launch {
             repo.observeNotes(userId).collect { notes ->
-                Log.d(TAG, "UI NOTES UPDATE size=${notes.size}")
                 adapter.submitList(notes)
             }
         }

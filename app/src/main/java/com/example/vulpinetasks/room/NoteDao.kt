@@ -35,6 +35,12 @@ interface NoteDao {
     @Query("SELECT * FROM notes WHERE userId = :userId")
     suspend fun getAllOnce(userId: String): List<NoteEntity>
 
+    @Query("SELECT * FROM notes WHERE userId = :userId AND serverId IS NULL")
+    suspend fun getUnsyncedNotes(userId: String): List<NoteEntity>
+
+    @Query("SELECT * FROM notes WHERE userId = :userId AND isDeleted = 0")
+    suspend fun getNotesForMigration(userId: String): List<NoteEntity>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(note: NoteEntity)
 
@@ -55,4 +61,24 @@ interface NoteDao {
 
     @Query("DELETE FROM notes WHERE userId = :userId")
     suspend fun clearAll(userId: String)
+
+    @Query("UPDATE notes SET userId = :newUserId WHERE userId = :oldUserId")
+    suspend fun migrateUserId(oldUserId: String, newUserId: String)
+
+    // Копирование заметок от одного пользователя другому
+    @Query("""
+        INSERT OR REPLACE INTO notes (id, userId, title, type, createdAt, updatedAt, isDeleted, serverId)
+        SELECT 
+            id, 
+            :newUserId AS userId, 
+            title, 
+            type, 
+            createdAt, 
+            updatedAt, 
+            isDeleted, 
+            NULL AS serverId
+        FROM notes 
+        WHERE userId = :sourceUserId AND isDeleted = 0
+    """)
+    suspend fun copyNotesToUser(sourceUserId: String, newUserId: String)
 }

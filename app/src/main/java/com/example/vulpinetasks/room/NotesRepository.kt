@@ -20,13 +20,11 @@ class NotesRepository(
 
     fun observeNotes(userId: String): Flow<List<NoteDto>> =
         dao.getNotes(userId).map { entities ->
-            Log.d(TAG, "FLOW NOTES EMIT size=${entities.size}")
             entities.map { it.toDto() }
         }
 
     fun observeTrash(userId: String): Flow<List<NoteDto>> =
         dao.getTrash(userId).map { entities ->
-            Log.d(TAG, "FLOW TRASH EMIT size=${entities.size}")
             entities.map { it.toDto() }
         }
 
@@ -36,8 +34,6 @@ class NotesRepository(
         userId: String,
         isOnline: Boolean
     ) {
-        Log.d(TAG, "createNote() title=$title type=$type userId=$userId online=$isOnline")
-
         val localId = UUID.randomUUID().toString()
         val now = System.currentTimeMillis()
 
@@ -52,11 +48,8 @@ class NotesRepository(
             serverId = null
         )
 
-        // Сохраняем локально
         dao.insert(localNote)
-        Log.d(TAG, "LOCAL NOTE CREATED id=$localId")
 
-        // Если онлайн - синхронизируем с сервером
         if (isOnline && !tokenManager.isGuest()) {
             syncCreateNoteToServer(localNote)
         }
@@ -65,16 +58,12 @@ class NotesRepository(
     private suspend fun syncCreateNoteToServer(localNote: NoteEntity) {
         try {
             val token = tokenManager.getToken() ?: return
-            Log.d(TAG, "API CREATE NOTE request for local id=${localNote.id}")
 
             val serverNote = api.createNote(
                 "Bearer $token",
                 CreateNoteRequest(localNote.title, localNote.type)
             )
 
-            Log.d(TAG, "API CREATE NOTE SUCCESS serverId=${serverNote.id}")
-
-            // Обновляем локальную заметку - заменяем локальный ID на серверный
             val updatedNote = NoteEntity(
                 id = serverNote.id,
                 userId = localNote.userId,
@@ -86,75 +75,183 @@ class NotesRepository(
                 serverId = serverNote.id
             )
 
-            // Удаляем старую запись с локальным ID
             dao.delete(localNote.id)
-            // Вставляем новую с серверным ID
             dao.insert(updatedNote)
 
-            Log.d(TAG, "LOCAL NOTE UPDATED WITH SERVER ID old=${localNote.id} new=${serverNote.id}")
+        } catch (e: Exception) {
+            Log.e(TAG, "SYNC FAILED", e)
+        }
+    }
+
+    /**
+     * Копирует заметки пользователя гостю при выходе из аккаунта
+     */
+    suspend fun copyUserNotesToGuest(userUserId: String, guestUserId: String) {
+        try {
+            Log.d(TAG, "COPY NOTES from user=$userUserId to guest=$guestUserId")
+
+            // Удаляем ВСЕ старые заметки гостя
+            dao.clearAll(guestUserId)
+            Log.d(TAG, "CLEARED old guest notes")
+
+            // Получаем активные заметки пользователя
+            val userNotes = dao.getAllActiveNotes(userUserId)
+            Log.d(TAG, "USER NOTES count=${userNotes.size}")
+
+            if (userNotes.isEmpty()) {
+                Log.d(TAG, "NO NOTES TO COPY")
+                return
+            }
+
+            // Копируем заметки гостю
+            userNotes.forEach { note ->
+                val guestNote = NoteEntity(
+                    id = UUID.randomUUID().toString(),
+                    userId = guestUserId,
+                    title = note.title,
+                    type = note.type,
+                    createdAt = note.createdAt,
+                    updatedAt = note.updatedAt,
+                    isDeleted = false,
+                    serverId = null
+                )
+                dao.insert(guestNote)
+            }
+
+            Log.d(TAG, "COPIED ${userNotes.size} notes to guest")
 
         } catch (e: Exception) {
-            Log.e(TAG, "API CREATE FAILED for local id=${localNote.id}", e)
+            Log.e(TAG, "COPY NOTES FAILED", e)
+        }
+    }
+
+    /**
+     * Миграция заметок гостя в аккаунт пользователя при входе
+     * Переносит только те заметки, которых еще нет у пользователя
+     */
+    suspend fun migrateGuestNotesToUser(guestUserId: String, userUserId: String) {
+        try {
+            Log.d(TAG, "MIGRATE guest=$guestUserId to user=$userUserId")
+
+            // Получаем заметки гостя
+            val guestNotes = dao.getAllActiveNotes(guestUserId)
+            Log.d(TAG, "GUEST NOTES count=${guestNotes.size}")
+
+            if (guestNotes.isEmpty()) {
+                Log.d(TAG, "NO GUEST NOTES TO MIGRATE")
+                return
+            }
+
+            // Получаем существующие заметки пользователя
+            val userNotes = dao.getAllActiveNotes(userUserId)
+            Log.d(TAG, "USER EXISTING NOTES count=${userNotes.size}")
+
+            // Создаем множество заголовков существующих заметок пользователя
+            val userNoteTitles = userNotes.map { it.title.lowercase().trim() }.toSet()
+
+            var migratedCount = 0
+
+            // Переносим только НОВЫЕ заметки (которых нет у пользователя)
+            guestNotes.forEach { note ->
+                val noteTitle = note.title.lowercase().trim()
+
+                // Проверяем, есть ли уже такая заметка у пользователя
+                if (noteTitle !in userNoteTitles) {
+                    val userNote = NoteEntity(
+                        id = UUID.randomUUID().toString(),
+                        userId = userUserId,
+                        title = note.title,
+                        type = note.type,
+                        createdAt = note.createdAt,
+                        updatedAt = note.updatedAt,
+                        isDeleted = false,
+                        serverId = null
+                    )
+                    dao.insert(userNote)
+                    migratedCount++
+                    Log.d(TAG, "MIGRATED: ${note.title}")
+                } else {
+                    Log.d(TAG, "SKIPPED DUPLICATE: ${note.title}")
+                }
+            }
+
+            // Удаляем ВСЕ заметки гостя после миграции
+            dao.clearAll(guestUserId)
+
+            Log.d(TAG, "MIGRATED $migratedCount notes, skipped ${guestNotes.size - migratedCount} duplicates")
+
+            // Синхронизируем только если были новые заметки
+            if (migratedCount > 0) {
+                syncUnsyncedNotes(userUserId)
+            }
+
+        } catch (e: Exception) {
+            Log.e(TAG, "MIGRATION FAILED", e)
+        }
+    }
+
+    suspend fun syncUnsyncedNotes(userId: String) {
+        if (tokenManager.isGuest()) return
+
+        val token = tokenManager.getToken() ?: return
+
+        try {
+            val unsyncedNotes = dao.getUnsyncedNotes(userId)
+            Log.d(TAG, "SYNC unsynced count=${unsyncedNotes.size}")
+
+            unsyncedNotes.forEach { note ->
+                try {
+                    val serverNote = api.createNote(
+                        "Bearer $token",
+                        CreateNoteRequest(note.title, note.type)
+                    )
+
+                    val updatedNote = NoteEntity(
+                        id = serverNote.id,
+                        userId = userId,
+                        title = serverNote.title,
+                        type = serverNote.type,
+                        createdAt = serverNote.createdAt,
+                        updatedAt = serverNote.updatedAt,
+                        isDeleted = note.isDeleted,
+                        serverId = serverNote.id
+                    )
+
+                    dao.delete(note.id)
+                    dao.insert(updatedNote)
+
+                } catch (e: Exception) {
+                    Log.e(TAG, "SYNC FAILED for note ${note.id}", e)
+                }
+            }
+
+        } catch (e: Exception) {
+            Log.e(TAG, "SYNC FAILED", e)
         }
     }
 
     suspend fun moveToTrash(noteId: String) {
-        Log.d(TAG, "moveToTrash() noteId=$noteId")
-
-        val note = dao.getActiveNoteById(noteId)
-        if (note == null) {
-            Log.e(TAG, "NOTE NOT FOUND id=$noteId")
-            return
-        }
-
-        Log.d(TAG, "MOVE TO TRASH note id=${note.id} title=${note.title}")
+        val note = dao.getActiveNoteById(noteId) ?: return
 
         val now = System.currentTimeMillis()
-
-        // Локально помечаем как удаленную
         dao.moveToTrash(note.id, now)
-        Log.d(TAG, "LOCAL MOVE TO TRASH OK id=${note.id}")
 
-        // Синхронизируем с сервером
-        if (!tokenManager.isGuest()) {
-            syncMoveToTrashToServer(note)
-        }
-    }
-
-    private suspend fun syncMoveToTrashToServer(note: NoteEntity) {
-        try {
-            val token = tokenManager.getToken() ?: return
-            val serverId = note.serverId ?: note.id
-
-            Log.d(TAG, "API MOVE TO TRASH serverId=$serverId")
-
-            // Пробуем удалить с сервера
-            api.deleteNote(serverId, "Bearer $token")
-            Log.d(TAG, "API MOVE TO TRASH OK id=$serverId")
-
-        } catch (e: Exception) {
-            Log.e(TAG, "API MOVE TO TRASH FAILED", e)
+        if (!tokenManager.isGuest() && note.serverId != null) {
+            try {
+                val token = tokenManager.getToken() ?: return
+                api.deleteNote(note.serverId, "Bearer $token")
+            } catch (e: Exception) {
+                Log.e(TAG, "API DELETE FAILED", e)
+            }
         }
     }
 
     suspend fun restoreFromTrash(noteId: String) {
-        Log.d(TAG, "restoreFromTrash() noteId=$noteId")
-
-        val note = dao.getTrashNoteById(noteId)
-        if (note == null) {
-            Log.e(TAG, "TRASH NOTE NOT FOUND id=$noteId")
-            return
-        }
-
-        Log.d(TAG, "RESTORE NOTE id=${note.id} title=${note.title}")
+        val note = dao.getTrashNoteById(noteId) ?: return
 
         val now = System.currentTimeMillis()
-
-        // Локально восстанавливаем
         dao.restoreFromTrash(note.id, now)
-        Log.d(TAG, "LOCAL RESTORE OK id=${note.id}")
 
-        // Синхронизируем с сервером
         if (!tokenManager.isGuest()) {
             syncRestoreToServer(note, now)
         }
@@ -163,134 +260,89 @@ class NotesRepository(
     private suspend fun syncRestoreToServer(note: NoteEntity, restoreTime: Long) {
         try {
             val token = tokenManager.getToken() ?: return
-            val serverId = note.serverId ?: note.id
 
-            Log.d(TAG, "API RESTORE - recreating note id=$serverId")
+            if (note.serverId != null) {
+                try {
+                    api.updateNote(
+                        note.serverId,
+                        "Bearer $token",
+                        UpdateNoteRequest(isDeleted = false)
+                    )
+                    return
+                } catch (e: Exception) {
+                    Log.w(TAG, "UPDATE RESTORE FAILED", e)
+                }
+            }
 
-            // Создаем заметку заново на сервере
-            val newServerNote = api.createNote(
+            val serverNote = api.createNote(
                 "Bearer $token",
                 CreateNoteRequest(note.title, note.type)
             )
 
-            Log.d(TAG, "API RESTORE SUCCESS newId=${newServerNote.id}")
-
-            // Обновляем локальную заметку с новым серверным ID
             val updatedNote = NoteEntity(
-                id = newServerNote.id,
+                id = serverNote.id,
                 userId = note.userId,
-                title = newServerNote.title,
-                type = newServerNote.type,
-                createdAt = newServerNote.createdAt,
+                title = serverNote.title,
+                type = serverNote.type,
+                createdAt = serverNote.createdAt,
                 updatedAt = restoreTime,
                 isDeleted = false,
-                serverId = newServerNote.id
+                serverId = serverNote.id
             )
 
-            // Удаляем старую запись
             dao.delete(note.id)
-            // Вставляем новую
             dao.insert(updatedNote)
 
-            Log.d(TAG, "LOCAL NOTE UPDATED AFTER RESTORE oldId=${note.id} newId=${newServerNote.id}")
-
         } catch (e: Exception) {
-            Log.e(TAG, "API RESTORE FAILED", e)
+            Log.e(TAG, "RESTORE SYNC FAILED", e)
         }
     }
 
     suspend fun deletePermanently(noteId: String) {
-        Log.d(TAG, "deletePermanently() noteId=$noteId")
-
-        val note = dao.getNoteById(noteId)
-        if (note == null) {
-            Log.e(TAG, "NOTE NOT FOUND FOR DELETE id=$noteId")
-            return
-        }
-
-        // Удаляем локально
+        val note = dao.getNoteById(noteId) ?: return
         dao.delete(noteId)
-        Log.d(TAG, "LOCAL DELETE OK id=$noteId")
 
-        // Удаляем с сервера
-        if (!tokenManager.isGuest()) {
-            syncDeleteToServer(note)
-        }
-    }
-
-    private suspend fun syncDeleteToServer(note: NoteEntity) {
-        try {
-            val token = tokenManager.getToken() ?: return
-            val serverId = note.serverId ?: note.id
-
-            Log.d(TAG, "API DELETE PERMANENTLY serverId=$serverId")
-            api.deleteNote(serverId, "Bearer $token")
-            Log.d(TAG, "API DELETE PERMANENTLY OK id=$serverId")
-        } catch (e: Exception) {
-            Log.e(TAG, "API DELETE PERMANENTLY FAILED", e)
+        if (!tokenManager.isGuest() && note.serverId != null) {
+            try {
+                val token = tokenManager.getToken() ?: return
+                api.deleteNote(note.serverId, "Bearer $token")
+            } catch (e: Exception) {
+                Log.e(TAG, "DELETE PERMANENTLY FAILED", e)
+            }
         }
     }
 
     suspend fun fetchFromServer(userId: String) {
-        if (tokenManager.isGuest()) {
-            Log.d(TAG, "FETCH SKIPPED - guest mode")
-            return
-        }
+        if (tokenManager.isGuest()) return
 
-        val token = tokenManager.getToken() ?: run {
-            Log.d(TAG, "FETCH SKIPPED - no token")
-            return
-        }
+        val token = tokenManager.getToken() ?: return
 
         try {
-            Log.d(TAG, "FETCH FROM SERVER userId=$userId")
-
-            // Получаем только активные заметки
             val serverNotes = api.getNotes("Bearer $token")
-            Log.d(TAG, "SERVER NOTES size=${serverNotes.size}")
-
-            // Получаем локальные заметки (все, включая удаленные)
             val localNotes = dao.getAllOnce(userId)
-            Log.d(TAG, "LOCAL NOTES size=${localNotes.size}")
 
-            // Синхронизируем только активные заметки
-            val serverActiveIds = serverNotes.map { it.id }.toSet()
-
-            // Удаляем локальные активные заметки, которых нет на сервере
+            // Удаляем локальные синхронизированные заметки, которых нет на сервере
             localNotes.forEach { local ->
-                if (!local.isDeleted && local.id !in serverActiveIds) {
-                    Log.d(TAG, "REMOVING LOCAL NOTE not on server id=${local.id}")
-                    dao.delete(local.id)
+                if (local.serverId != null) {
+                    val existsOnServer = serverNotes.any { it.id == local.serverId }
+                    if (!existsOnServer) {
+                        dao.delete(local.id)
+                    }
                 }
             }
 
-            // Добавляем/обновляем заметки с сервера
+            // Добавляем новые заметки с сервера, которых нет локально
             serverNotes.forEach { server ->
-                val existingLocal = localNotes.find { it.id == server.id }
-
-                if (existingLocal == null || !existingLocal.isDeleted) {
-                    val entity = server.toEntity()
-                    Log.d(TAG, "UPSERTING SERVER NOTE id=${entity.id}")
-                    dao.insert(entity)
-                } else {
-                    Log.d(TAG, "SKIPPING SERVER NOTE (locally deleted) id=${server.id}")
+                val existsLocally = localNotes.any {
+                    it.serverId == server.id || it.id == server.id
+                }
+                if (!existsLocally) {
+                    dao.insert(server.toEntity())
                 }
             }
-
-            Log.d(TAG, "FETCH COMPLETED SUCCESSFULLY")
 
         } catch (e: Exception) {
-            Log.e(TAG, "FETCH FAILED: ${e.message}", e)
+            Log.e(TAG, "FETCH FAILED", e)
         }
-    }
-
-    suspend fun syncAll(userId: String) {
-        if (tokenManager.isGuest()) {
-            Log.d(TAG, "SYNC SKIPPED - guest mode")
-            return
-        }
-
-        // Загружаем свежие данные с сервера
-        fetchFromServer(userId)
     }
 }

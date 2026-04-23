@@ -37,9 +37,20 @@ class LoginActivity : AppCompatActivity() {
         binding.registerButton.setOnClickListener { register() }
 
         binding.logoutButton.setOnClickListener {
-            tokenManager.logout()
-            updateUI()
-            toast("Выход выполнен")
+            lifecycleScope.launch {
+                val userUserId = tokenManager.getUserId()
+                val guestUserId = tokenManager.getGuestUserId()
+
+                // Копируем заметки пользователя гостю (старые гостевые удалятся)
+                if (userUserId != null && guestUserId != null) {
+                    AppGraph.notesRepository.copyUserNotesToGuest(userUserId, guestUserId)
+                }
+
+                tokenManager.logout()
+                updateUI()
+
+                toast("Вы вышли из аккаунта. Заметки сохранены локально.")
+            }
         }
 
         binding.backButton.setOnClickListener {
@@ -47,14 +58,21 @@ class LoginActivity : AppCompatActivity() {
         }
 
         binding.guestButton.setOnClickListener {
-            tokenManager.setGuestMode(true)
+            lifecycleScope.launch {
+                val userId = tokenManager.getUserId()
+                val guestUserId = tokenManager.getGuestUserId()
 
-            if (tokenManager.getUserId() == null) {
-                tokenManager.saveUserId("guest_${System.currentTimeMillis()}")
+                // Если был залогинен - копируем заметки гостю
+                if (!tokenManager.isGuest() && userId != null) {
+                    AppGraph.notesRepository.copyUserNotesToGuest(userId, guestUserId)
+                }
+
+                tokenManager.setGuestMode(true)
+                tokenManager.saveUserId(guestUserId)
+
+                startActivity(Intent(this@LoginActivity, MainActivity::class.java))
+                finish()
             }
-
-            startActivity(Intent(this, MainActivity::class.java))
-            finish()
         }
     }
 
@@ -82,6 +100,8 @@ class LoginActivity : AppCompatActivity() {
 
         lifecycleScope.launch {
             try {
+                val guestUserId = tokenManager.getGuestUserId()
+
                 val res = RetrofitClient.api.login(
                     AuthRequest(email, password)
                 )
@@ -91,6 +111,10 @@ class LoginActivity : AppCompatActivity() {
                 tokenManager.saveEmail(email)
                 tokenManager.setGuestMode(false)
 
+                // Мигрируем гостевые заметки (после миграции гостевые удалятся)
+                AppGraph.notesRepository.migrateGuestNotesToUser(guestUserId, res.userId)
+
+                // Загружаем с сервера
                 AppGraph.notesRepository.fetchFromServer(res.userId)
 
                 startActivity(Intent(this@LoginActivity, MainActivity::class.java))
@@ -114,12 +138,8 @@ class LoginActivity : AppCompatActivity() {
 
         lifecycleScope.launch {
             try {
-                RetrofitClient.api.register(
-                    AuthRequest(email, password)
-                )
-
+                RetrofitClient.api.register(AuthRequest(email, password))
                 toast("Регистрация успешна. Теперь войдите.")
-
             } catch (e: Exception) {
                 e.printStackTrace()
                 toast("Ошибка регистрации: ${e.message}")

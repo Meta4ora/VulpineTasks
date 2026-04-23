@@ -29,6 +29,6 @@ fun NoteDto.toEntity(): NoteEntity {
         createdAt = createdAt,
         updatedAt = updatedAt,
         isDeleted = isDeleted,
-        serverId = id // Сохраняем ID сервера
+        serverId = id
     )
 }
