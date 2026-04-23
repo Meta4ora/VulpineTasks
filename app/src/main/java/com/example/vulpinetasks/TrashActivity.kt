@@ -2,6 +2,7 @@ package com.example.vulpinetasks
 
 import android.app.AlertDialog
 import android.os.Bundle
+import android.util.Log
 import android.view.View
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
@@ -22,6 +23,10 @@ class TrashActivity : AppCompatActivity() {
     private lateinit var userId: String
     private lateinit var tokenManager: TokenManager
 
+    companion object {
+        private const val TAG = "VULPINE_TRASH"
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -29,7 +34,9 @@ class TrashActivity : AppCompatActivity() {
         setContentView(binding.root)
 
         tokenManager = TokenManager(this)
-        userId = tokenManager.getUserId() ?: ""
+        userId = tokenManager.getUserId() ?: "guest"
+
+        Log.d(TAG, "TrashActivity created userId=$userId")
 
         setupRecycler()
         observeTrash()
@@ -37,30 +44,34 @@ class TrashActivity : AppCompatActivity() {
 
     private fun setupRecycler() {
         adapter = TrashAdapter(
-            emptyList(),
-            onRestore = {
+            notes = emptyList(),
+            onRestore = { note ->
+                Log.d(TAG, "RESTORE CLICK id=${note.id}")
                 lifecycleScope.launch {
-                    repo.restore(it)
+                    repo.restoreFromTrash(note.id)
+                    toast("Заметка восстановлена")
                 }
             },
-            onDelete = {
-                showDeleteDialog(it)
+            onDelete = { note ->
+                Log.d(TAG, "DELETE CLICK id=${note.id}")
+                showDeleteDialog(note)
             }
         )
 
-        binding.recycler.layoutManager =
-            LinearLayoutManager(this)
-
+        binding.recycler.layoutManager = LinearLayoutManager(this)
         binding.recycler.adapter = adapter
     }
 
     private fun observeTrash() {
+        Log.d(TAG, "observeTrash() userId=$userId")
         lifecycleScope.launch {
             repo.observeTrash(userId).collect { list ->
+                Log.d(TAG, "UI TRASH UPDATE size=${list.size}")
+                list.forEach { note ->
+                    Log.d(TAG, "TRASH ITEM id=${note.id} title=${note.title}")
+                }
                 adapter.update(list)
-
-                binding.emptyText.visibility =
-                    if (list.isEmpty()) View.VISIBLE else View.GONE
+                binding.emptyText.visibility = if (list.isEmpty()) View.VISIBLE else View.GONE
             }
         }
     }
@@ -68,9 +79,11 @@ class TrashActivity : AppCompatActivity() {
     private fun showDeleteDialog(note: NoteDto) {
         AlertDialog.Builder(this)
             .setTitle("Удалить заметку?")
+            .setMessage("Заметка будет удалена навсегда")
             .setPositiveButton("Удалить") { _, _ ->
                 lifecycleScope.launch {
-                    repo.delete(note)
+                    repo.deletePermanently(note.id)
+                    toast("Заметка удалена")
                 }
             }
             .setNegativeButton("Отмена", null)

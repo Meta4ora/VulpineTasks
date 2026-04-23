@@ -2,6 +2,7 @@ package com.example.vulpinetasks
 
 import android.content.Intent
 import android.os.Bundle
+import android.util.Log
 import android.widget.EditText
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
@@ -24,6 +25,10 @@ class MainActivity : AppCompatActivity() {
     private val repo get() = AppGraph.notesRepository
     private lateinit var userId: String
 
+    companion object {
+        private const val TAG = "VULPINE_MAIN"
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -37,6 +42,8 @@ class MainActivity : AppCompatActivity() {
 
         tokenManager.saveUserId(userId)
 
+        Log.d(TAG, "MainActivity created userId=$userId")
+
         setupRecycler()
         observeNotes()
         setupDrawer()
@@ -48,29 +55,37 @@ class MainActivity : AppCompatActivity() {
         binding.addNoteButton.setOnClickListener {
             showCreateDialog()
         }
+
+        binding.syncButton.setOnClickListener {
+            lifecycleScope.launch {
+                repo.syncAll(userId)
+                toast("Синхронизация завершена")
+            }
+        }
     }
 
     private fun setupRecycler() {
         adapter = NotesAdapter(
-            onOpen = {
-                toast("Open: ${it.title}")
+            onOpen = { note ->
+                toast("Open: ${note.title}")
             },
-            onTrash = {
+            onTrash = { note ->
                 lifecycleScope.launch {
-                    repo.moveToTrash(it)
+                    repo.moveToTrash(note.id)
+                    toast("Перемещено в корзину")
                 }
             }
         )
 
-        binding.notesRecyclerView.layoutManager =
-            LinearLayoutManager(this)
+        binding.notesRecyclerView.layoutManager = LinearLayoutManager(this)
         binding.notesRecyclerView.adapter = adapter
     }
 
     private fun observeNotes() {
         lifecycleScope.launch {
-            repo.observeNotes(userId).collect {
-                adapter.submitList(it)
+            repo.observeNotes(userId).collect { notes ->
+                Log.d(TAG, "UI NOTES UPDATE size=${notes.size}")
+                adapter.submitList(notes)
             }
         }
     }
@@ -96,21 +111,26 @@ class MainActivity : AppCompatActivity() {
 
     private fun showCreateDialog() {
         val input = EditText(this)
+        input.hint = "Введите заголовок заметки"
 
         AlertDialog.Builder(this)
             .setTitle("Новая заметка")
             .setView(input)
             .setPositiveButton("Создать") { _, _ ->
                 val text = input.text.toString().trim()
-                if (text.isEmpty()) return@setPositiveButton
+                if (text.isEmpty()) {
+                    toast("Заголовок не может быть пустым")
+                    return@setPositiveButton
+                }
 
                 lifecycleScope.launch {
                     repo.createNote(
-                        text,
-                        "note",
-                        userId,
-                        NetworkUtil.isOnline(this@MainActivity)
+                        title = text,
+                        type = "note",
+                        userId = userId,
+                        isOnline = NetworkUtil.isOnline(this@MainActivity)
                     )
+                    toast("Заметка создана")
                 }
             }
             .setNegativeButton("Отмена", null)

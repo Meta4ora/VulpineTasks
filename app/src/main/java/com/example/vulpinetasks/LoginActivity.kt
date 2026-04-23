@@ -37,11 +37,8 @@ class LoginActivity : AppCompatActivity() {
         binding.registerButton.setOnClickListener { register() }
 
         binding.logoutButton.setOnClickListener {
-            val userId = tokenManager.getUserId()
-
             tokenManager.logout()
             updateUI()
-
             toast("Выход выполнен")
         }
 
@@ -67,10 +64,7 @@ class LoginActivity : AppCompatActivity() {
         if (token != null) {
             binding.loginCard.visibility = View.GONE
             binding.profileCard.visibility = View.VISIBLE
-
-            binding.userEmail.text =
-                tokenManager.getEmail() ?: "Unknown user"
-
+            binding.userEmail.text = tokenManager.getEmail() ?: "Unknown user"
         } else {
             binding.loginCard.visibility = View.VISIBLE
             binding.profileCard.visibility = View.GONE
@@ -78,8 +72,8 @@ class LoginActivity : AppCompatActivity() {
     }
 
     private fun login() {
-        val email = binding.email.text.toString()
-        val password = binding.password.text.toString()
+        val email = binding.email.text.toString().trim()
+        val password = binding.password.text.toString().trim()
 
         if (email.isBlank() || password.isBlank()) {
             toast("Введите email и пароль")
@@ -104,14 +98,19 @@ class LoginActivity : AppCompatActivity() {
 
             } catch (e: Exception) {
                 e.printStackTrace()
-                toast("Ошибка входа")
+                toast("Ошибка входа: ${e.message}")
             }
         }
     }
 
     private fun register() {
-        val email = binding.email.text.toString()
-        val password = binding.password.text.toString()
+        val email = binding.email.text.toString().trim()
+        val password = binding.password.text.toString().trim()
+
+        if (email.isBlank() || password.isBlank()) {
+            toast("Введите email и пароль")
+            return
+        }
 
         lifecycleScope.launch {
             try {
@@ -119,10 +118,11 @@ class LoginActivity : AppCompatActivity() {
                     AuthRequest(email, password)
                 )
 
-                toast("Регистрация успешна")
+                toast("Регистрация успешна. Теперь войдите.")
 
             } catch (e: Exception) {
-                toast("Ошибка регистрации")
+                e.printStackTrace()
+                toast("Ошибка регистрации: ${e.message}")
             }
         }
     }

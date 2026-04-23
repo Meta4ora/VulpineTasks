@@ -2,51 +2,46 @@ package com.example.vulpinetasks.backend
 
 import retrofit2.http.*
 
-data class AuthRequest(val email: String, val password: String)
-data class AuthResponse(val token: String, val userId: String)
-data class RegisterResponse(val id: String, val email: String)
-
-data class CreateNoteRequest(
-    val title: String,
-    val type: String,
-    val parentId: String? = null
+data class AuthRequest(
+    val email: String,
+    val password: String
 )
 
-data class NoteDto(
-    val id: String,
-    val userId: String,
-    val title: String,
-    val type: String,
-    val parentId: String?,
-    val filePath: String,
-    val createdAt: Long,
-    val updatedAt: Long
+data class AuthResponse(
+    val token: String,
+    val userId: String
 )
 
 interface ApiService {
 
-    @POST("auth/register")
-    suspend fun register(@Body body: AuthRequest): RegisterResponse
-
+    // Auth endpoints
     @POST("auth/login")
-    suspend fun login(@Body body: AuthRequest): AuthResponse
+    suspend fun login(
+        @Body request: AuthRequest
+    ): AuthResponse
 
+    @POST("auth/register")
+    suspend fun register(
+        @Body request: AuthRequest
+    ): AuthResponse
+
+    // Notes endpoints
     @GET("notes")
     suspend fun getNotes(
-        @Header("Authorization") token: String,
-        @Query("parentId") parentId: String? = null
+        @Header("Authorization") token: String
     ): List<NoteDto>
 
     @POST("notes")
     suspend fun createNote(
         @Header("Authorization") token: String,
-        @Body body: CreateNoteRequest
-    )
+        @Body request: CreateNoteRequest
+    ): NoteDto
 
-    @GET("notes/{id}")
-    suspend fun getNote(
+    @PUT("notes/{id}")
+    suspend fun updateNote(
         @Path("id") id: String,
-        @Header("Authorization") token: String
+        @Header("Authorization") token: String,
+        @Body request: UpdateNoteRequest
     ): NoteDto
 
     @DELETE("notes/{id}")

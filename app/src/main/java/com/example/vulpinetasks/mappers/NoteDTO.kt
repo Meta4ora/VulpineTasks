@@ -1,15 +1,24 @@
-package com.example.vulpinetasks.mappers
+package com.example.vulpinetasks.backend
 
-import com.example.vulpinetasks.backend.NoteDto
+data class NoteDto(
+    val id: String,
+    val userId: String,
+    val title: String,
+    val type: String,
+    val parentId: String? = null,
+    val filePath: String? = null,
+    val createdAt: Long,
+    val updatedAt: Long,
+    val isDeleted: Boolean = false
+)
 
-fun com.example.vulpinetasks.room.NoteEntity.toDto() =
-    NoteDto(
-        id = id,
-        userId = userId,
-        title = title,
-        type = type,
-        parentId = null,
-        filePath = "",
-        createdAt = updatedAt,
-        updatedAt = updatedAt
-    )
+data class CreateNoteRequest(
+    val title: String,
+    val type: String
+)
+
+data class UpdateNoteRequest(
+    val title: String? = null,
+    val type: String? = null,
+    val isDeleted: Boolean? = null
+)

@@ -1,6 +1,8 @@
 package com.example.vulpinetasks
 
-import android.view.*
+import android.view.LayoutInflater
+import android.view.View
+import android.view.ViewGroup
 import android.widget.ImageView
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
@@ -30,10 +32,9 @@ class TrashAdapter(
     }
 
     inner class VH(view: View) : RecyclerView.ViewHolder(view) {
-
-        private val title = view.findViewById<TextView>(R.id.title)
-        private val restore = view.findViewById<ImageView>(R.id.restore)
-        private val delete = view.findViewById<ImageView>(R.id.delete)
+        private val title: TextView = view.findViewById(R.id.title)
+        private val restore: ImageView = view.findViewById(R.id.restore)
+        private val delete: ImageView = view.findViewById(R.id.delete)
 
         fun bind(note: NoteDto) {
             title.text = note.title
