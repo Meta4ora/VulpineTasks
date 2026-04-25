@@ -66,7 +66,10 @@ class MainActivity : AppCompatActivity() {
     private fun setupRecycler() {
         adapter = NotesAdapter(
             onOpen = { note ->
-                toast("Open: ${note.title}")
+                val intent = Intent(this, NoteEditorActivity::class.java)
+                intent.putExtra("note_id", note.id)
+                intent.putExtra("note_title", note.title)
+                startActivity(intent)
             },
             onTrash = { note ->
                 lifecycleScope.launch {

@@ -11,9 +11,12 @@ object AppGraph {
         DatabaseProvider.init(context)
 
         notesRepository = NotesRepository(
+            context = context,
             dao = DatabaseProvider.db.noteDao(),
             api = RetrofitClient.api,
             tokenManager = TokenManager(context)
         )
+
+        notesRepository.initFileStorage()
     }
 }

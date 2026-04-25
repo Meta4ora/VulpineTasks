@@ -1,14 +1,18 @@
 package com.example.vulpinetasks.room
 
+import android.content.Context
 import android.util.Log
 import com.example.vulpinetasks.backend.*
 import com.example.vulpinetasks.mappers.toDto
 import com.example.vulpinetasks.mappers.toEntity
+import com.example.vulpinetasks.util.FileStorageManager
+import com.example.vulpinetasks.util.NetworkUtil
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import java.util.UUID
 
 class NotesRepository(
+    private val context: Context,
     private val dao: NoteDao,
     private val api: ApiService,
     private val tokenManager: TokenManager
@@ -16,6 +20,12 @@ class NotesRepository(
 
     companion object {
         private const val TAG = "VULPINE_REPO"
+    }
+
+    private lateinit var fileStorage: FileStorageManager
+
+    fun initFileStorage() {
+        fileStorage = FileStorageManager(context)
     }
 
     fun observeNotes(userId: String): Flow<List<NoteDto>> =
@@ -28,6 +38,83 @@ class NotesRepository(
             entities.map { it.toDto() }
         }
 
+    suspend fun getNoteContent(noteId: String, userId: String): String {
+        val localContent = fileStorage.loadNoteContent(userId, noteId)
+        if (localContent != null) {
+            Log.d(TAG, "Loaded content from LOCAL file for note $noteId")
+            return localContent
+        }
+
+        if (!tokenManager.isGuest() && NetworkUtil.isOnline(context)) {
+            try {
+                val token = tokenManager.getToken()
+                if (token != null) {
+                    val content = api.getNoteContent(noteId, "Bearer $token")
+                    Log.d(TAG, "Loaded content from SERVER for note $noteId")
+
+                    fileStorage.saveNoteContent(userId, noteId, content)
+
+                    val note = dao.getNoteById(noteId)
+                    if (note != null && note.content != content) {
+                        dao.insert(note.copy(content = content))
+                    }
+
+                    return content
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to load from server", e)
+            }
+        }
+
+        val note = dao.getNoteById(noteId)
+        if (note != null && note.content.isNotEmpty()) {
+            Log.d(TAG, "Loaded content from DATABASE for note $noteId")
+            return note.content
+        }
+
+        return generateDefaultContent(note?.title ?: "Заметка")
+    }
+
+    suspend fun updateNoteContent(
+        noteId: String,
+        userId: String,
+        newContent: String
+    ) {
+        fileStorage.saveNoteContent(userId, noteId, newContent)
+
+        val note = dao.getNoteById(noteId)
+        if (note != null) {
+            val updatedNote = note.copy(
+                content = newContent,
+                updatedAt = System.currentTimeMillis()
+            )
+            dao.insert(updatedNote)
+        }
+
+        if (!tokenManager.isGuest() && NetworkUtil.isOnline(context)) {
+            try {
+                val token = tokenManager.getToken()
+                if (token != null) {
+                    api.updateNoteContent(noteId, "Bearer $token", newContent)
+                    Log.d(TAG, "Content synced to server for note $noteId")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to sync content to server", e)
+                markNoteAsDirty(noteId)
+            }
+        } else {
+            markNoteAsDirty(noteId)
+        }
+    }
+
+    private suspend fun markNoteAsDirty(noteId: String) {
+        Log.d(TAG, "Note $noteId marked as dirty (needs sync)")
+    }
+
+    private fun generateDefaultContent(title: String): String {
+        return "# $title\n\nНапишите здесь содержание заметки..."
+    }
+
     suspend fun createNote(
         title: String,
         type: String,
@@ -36,19 +123,23 @@ class NotesRepository(
     ) {
         val localId = UUID.randomUUID().toString()
         val now = System.currentTimeMillis()
+        val defaultContent = generateDefaultContent(title)
 
         val localNote = NoteEntity(
             id = localId,
             userId = userId,
             title = title,
             type = type,
+            content = defaultContent,
             createdAt = now,
             updatedAt = now,
             isDeleted = false,
-            serverId = null
+            serverId = null,
+            filePath = null
         )
 
         dao.insert(localNote)
+        fileStorage.saveNoteContent(userId, localId, defaultContent)
 
         if (isOnline && !tokenManager.isGuest()) {
             syncCreateNoteToServer(localNote)
@@ -61,25 +152,27 @@ class NotesRepository(
 
             val serverNote = api.createNote(
                 "Bearer $token",
-                CreateNoteRequest(localNote.title, localNote.type)
+                CreateNoteRequest(localNote.title, localNote.type, null)
             )
 
-            val updatedNote = NoteEntity(
+            val updatedNote = localNote.copy(
                 id = serverNote.id,
-                userId = localNote.userId,
-                title = serverNote.title,
-                type = serverNote.type,
-                createdAt = serverNote.createdAt,
-                updatedAt = serverNote.updatedAt,
-                isDeleted = false,
-                serverId = serverNote.id
+                serverId = serverNote.id,
+                filePath = serverNote.filePath
             )
 
             dao.delete(localNote.id)
             dao.insert(updatedNote)
 
+            if (localNote.content.isNotEmpty()) {
+                api.updateNoteContent(serverNote.id, "Bearer $token", localNote.content)
+            }
+
+            fileStorage.deleteNoteFile(localNote.userId, localNote.id)
+            fileStorage.saveNoteContent(localNote.userId, serverNote.id, localNote.content)
+
         } catch (e: Exception) {
-            Log.e(TAG, "SYNC FAILED", e)
+            Log.e(TAG, "SYNC CREATE FAILED", e)
         }
     }
 
@@ -90,11 +183,9 @@ class NotesRepository(
         try {
             Log.d(TAG, "COPY NOTES from user=$userUserId to guest=$guestUserId")
 
-            // Удаляем ВСЕ старые заметки гостя
             dao.clearAll(guestUserId)
             Log.d(TAG, "CLEARED old guest notes")
 
-            // Получаем активные заметки пользователя
             val userNotes = dao.getAllActiveNotes(userUserId)
             Log.d(TAG, "USER NOTES count=${userNotes.size}")
 
@@ -103,19 +194,29 @@ class NotesRepository(
                 return
             }
 
-            // Копируем заметки гостю
             userNotes.forEach { note ->
+                val newGuestId = UUID.randomUUID().toString()
+
                 val guestNote = NoteEntity(
-                    id = UUID.randomUUID().toString(),
+                    id = newGuestId,
                     userId = guestUserId,
                     title = note.title,
                     type = note.type,
+                    content = note.content, // Копируем содержимое
                     createdAt = note.createdAt,
                     updatedAt = note.updatedAt,
                     isDeleted = false,
-                    serverId = null
+                    serverId = null,
+                    filePath = null
                 )
                 dao.insert(guestNote)
+
+                val content = fileStorage.loadNoteContent(userUserId, note.id)
+                if (content != null && content.isNotEmpty()) {
+                    fileStorage.saveNoteContent(guestUserId, newGuestId, content)
+                } else if (note.content.isNotEmpty()) {
+                    fileStorage.saveNoteContent(guestUserId, newGuestId, note.content)
+                }
             }
 
             Log.d(TAG, "COPIED ${userNotes.size} notes to guest")
@@ -133,7 +234,6 @@ class NotesRepository(
         try {
             Log.d(TAG, "MIGRATE guest=$guestUserId to user=$userUserId")
 
-            // Получаем заметки гостя
             val guestNotes = dao.getAllActiveNotes(guestUserId)
             Log.d(TAG, "GUEST NOTES count=${guestNotes.size}")
 
@@ -142,48 +242,74 @@ class NotesRepository(
                 return
             }
 
-            // Получаем существующие заметки пользователя
             val userNotes = dao.getAllActiveNotes(userUserId)
-            Log.d(TAG, "USER EXISTING NOTES count=${userNotes.size}")
 
-            // Создаем множество заголовков существующих заметок пользователя
-            val userNoteTitles = userNotes.map { it.title.lowercase().trim() }.toSet()
+            val userNotesByTitle = userNotes.associateBy {
+                it.title.lowercase().trim()
+            }
 
-            var migratedCount = 0
+            val userNotesByContent = userNotes.filter { it.content.isNotEmpty() }
+                .associateBy { it.content.take(100) } // Сравниваем первые 100 символов
 
-            // Переносим только НОВЫЕ заметки (которых нет у пользователя)
-            guestNotes.forEach { note ->
-                val noteTitle = note.title.lowercase().trim()
+            var mergedCount = 0
+            var skippedCount = 0
 
-                // Проверяем, есть ли уже такая заметка у пользователя
-                if (noteTitle !in userNoteTitles) {
-                    val userNote = NoteEntity(
+            guestNotes.forEach { guestNote ->
+                val titleKey = guestNote.title.lowercase().trim()
+                val contentKey = guestNote.content.take(100)
+
+                val existingNote = userNotesByTitle[titleKey]
+                    ?: userNotesByContent[contentKey]
+                    ?: userNotes.find { it.serverId == guestNote.serverId }
+
+                if (existingNote == null) {
+                    val newNote = NoteEntity(
                         id = UUID.randomUUID().toString(),
                         userId = userUserId,
-                        title = note.title,
-                        type = note.type,
-                        createdAt = note.createdAt,
-                        updatedAt = note.updatedAt,
+                        title = guestNote.title,
+                        type = guestNote.type,
+                        content = guestNote.content,
+                        createdAt = guestNote.createdAt,
+                        updatedAt = guestNote.updatedAt,
                         isDeleted = false,
-                        serverId = null
+                        serverId = null,
+                        filePath = null
                     )
-                    dao.insert(userNote)
-                    migratedCount++
-                    Log.d(TAG, "MIGRATED: ${note.title}")
+                    dao.insert(newNote)
+
+                    val content = fileStorage.loadNoteContent(guestUserId, guestNote.id)
+                    if (content != null && content.isNotEmpty()) {
+                        fileStorage.saveNoteContent(userUserId, newNote.id, content)
+                    }
+
+                    mergedCount++
+                    Log.d(TAG, "MERGED NEW: ${guestNote.title}")
                 } else {
-                    Log.d(TAG, "SKIPPED DUPLICATE: ${note.title}")
+                    if (guestNote.updatedAt > existingNote.updatedAt) {
+                        val updatedNote = existingNote.copy(
+                            title = guestNote.title,
+                            content = guestNote.content,
+                            updatedAt = guestNote.updatedAt
+                        )
+                        dao.insert(updatedNote)
+
+                        fileStorage.saveNoteContent(userUserId, existingNote.id, guestNote.content)
+
+                        mergedCount++
+                        Log.d(TAG, "MERGED UPDATED: ${guestNote.title} (guest newer)")
+                    } else {
+                        skippedCount++
+                        Log.d(TAG, "SKIPPED: ${guestNote.title} (already exists, local older)")
+                    }
                 }
             }
 
-            // Удаляем ВСЕ заметки гостя после миграции
             dao.clearAll(guestUserId)
-
-            Log.d(TAG, "MIGRATED $migratedCount notes, skipped ${guestNotes.size - migratedCount} duplicates")
-
-            // Синхронизируем только если были новые заметки
-            if (migratedCount > 0) {
-                syncUnsyncedNotes(userUserId)
+            guestNotes.forEach { guestNote ->
+                fileStorage.deleteNoteFile(guestUserId, guestNote.id)
             }
+
+            Log.d(TAG, "MIGRATION COMPLETE: merged=$mergedCount, skipped=$skippedCount")
 
         } catch (e: Exception) {
             Log.e(TAG, "MIGRATION FAILED", e)
@@ -201,24 +327,46 @@ class NotesRepository(
 
             unsyncedNotes.forEach { note ->
                 try {
-                    val serverNote = api.createNote(
-                        "Bearer $token",
-                        CreateNoteRequest(note.title, note.type)
-                    )
+                    if (note.serverId == null) {
+                        val serverNote = api.createNote(
+                            "Bearer $token",
+                            CreateNoteRequest(note.title, note.type, null)
+                        )
 
-                    val updatedNote = NoteEntity(
-                        id = serverNote.id,
-                        userId = userId,
-                        title = serverNote.title,
-                        type = serverNote.type,
-                        createdAt = serverNote.createdAt,
-                        updatedAt = serverNote.updatedAt,
-                        isDeleted = note.isDeleted,
-                        serverId = serverNote.id
-                    )
+                        if (note.content.isNotEmpty()) {
+                            api.updateNoteContent(serverNote.id, "Bearer $token", note.content)
+                        }
 
-                    dao.delete(note.id)
-                    dao.insert(updatedNote)
+                        val updatedNote = note.copy(
+                            id = serverNote.id,
+                            serverId = serverNote.id,
+                            filePath = serverNote.filePath
+                        )
+
+                        dao.delete(note.id)
+                        dao.insert(updatedNote)
+
+                        fileStorage.saveNoteContent(userId, updatedNote.id, note.content)
+                        if (note.id != updatedNote.id) {
+                            fileStorage.deleteNoteFile(userId, note.id)
+                        }
+                        Log.d(TAG, "SYNCED new note ${note.id} -> ${serverNote.id}")
+
+                    } else {
+                        if (note.content.isNotEmpty()) {
+                            api.updateNoteContent(note.serverId, "Bearer $token", note.content)
+                        }
+
+                        api.updateNote(
+                            note.serverId,
+                            "Bearer $token",
+                            UpdateNoteRequest(title = note.title, content = note.content)
+                        )
+
+                        val updatedNote = note.copy(updatedAt = System.currentTimeMillis())
+                        dao.insert(updatedNote)
+                        Log.d(TAG, "SYNCED existing note ${note.id}")
+                    }
 
                 } catch (e: Exception) {
                     Log.e(TAG, "SYNC FAILED for note ${note.id}", e)
@@ -298,6 +446,32 @@ class NotesRepository(
         }
     }
 
+    suspend fun syncLocalChangesToServer(userId: String) {
+        if (tokenManager.isGuest()) return
+
+        val token = tokenManager.getToken() ?: return
+        val localNotes = dao.getAllOnce(userId)
+
+        localNotes.forEach { localNote ->
+            if (localNote.serverId != null) {
+                val localContent = fileStorage.loadNoteContent(userId, localNote.id)
+                if (localContent != null && localContent != localNote.content) {
+                    try {
+                        api.updateNoteContent(localNote.serverId, "Bearer $token", localContent)
+                        val updatedNote = localNote.copy(
+                            content = localContent,
+                            updatedAt = System.currentTimeMillis()
+                        )
+                        dao.insert(updatedNote)
+                        Log.d(TAG, "SYNCED local changes to server: ${localNote.title}")
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to sync local changes", e)
+                    }
+                }
+            }
+        }
+    }
+
     suspend fun deletePermanently(noteId: String) {
         val note = dao.getNoteById(noteId) ?: return
         dao.delete(noteId)
@@ -312,6 +486,24 @@ class NotesRepository(
         }
     }
 
+    private suspend fun downloadNoteContent(
+        userId: String,
+        noteId: String,
+        token: String
+    ) {
+        try {
+            val content = api.getNoteContent(noteId, "Bearer $token")
+            fileStorage.saveNoteContent(userId, noteId, content)
+
+            val note = dao.getNoteById(noteId)
+            if (note != null && note.content != content) {
+                dao.insert(note.copy(content = content))
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to download content for $noteId", e)
+        }
+    }
+
     suspend fun fetchFromServer(userId: String) {
         if (tokenManager.isGuest()) return
 
@@ -321,23 +513,75 @@ class NotesRepository(
             val serverNotes = api.getNotes("Bearer $token")
             val localNotes = dao.getAllOnce(userId)
 
-            // Удаляем локальные синхронизированные заметки, которых нет на сервере
-            localNotes.forEach { local ->
-                if (local.serverId != null) {
-                    val existsOnServer = serverNotes.any { it.id == local.serverId }
-                    if (!existsOnServer) {
-                        dao.delete(local.id)
+            val syncedLocalNotes = localNotes.filter { it.serverId != null }
+            val unsyncedLocalNotes = localNotes.filter { it.serverId == null }
+
+            serverNotes.forEach { serverNote ->
+                val existingLocal = syncedLocalNotes.find {
+                    it.serverId == serverNote.id || it.id == serverNote.id
+                }
+
+                if (existingLocal == null) {
+                    val duplicateByTitle = unsyncedLocalNotes.find {
+                        it.title.equals(serverNote.title, ignoreCase = true)
+                    }
+
+                    if (duplicateByTitle != null) {
+                        val updatedNote = duplicateByTitle.copy(
+                            serverId = serverNote.id,
+                            filePath = serverNote.filePath,
+                            updatedAt = maxOf(duplicateByTitle.updatedAt, serverNote.updatedAt)
+                        )
+                        dao.insert(updatedNote)
+                        Log.d(TAG, "LINKED local note to server: ${serverNote.title}")
+                    } else {
+                        val newNote = NoteEntity(
+                            id = serverNote.id,
+                            userId = serverNote.userId,
+                            title = serverNote.title,
+                            type = serverNote.type,
+                            content = "",
+                            createdAt = serverNote.createdAt,
+                            updatedAt = serverNote.updatedAt,
+                            isDeleted = serverNote.isDeleted,
+                            serverId = serverNote.id,
+                            filePath = serverNote.filePath
+                        )
+                        dao.insert(newNote)
+                        Log.d(TAG, "ADDED new server note: ${serverNote.title}")
+                        downloadNoteContent(userId, serverNote.id, token)
+                    }
+                } else if (serverNote.updatedAt > existingLocal.updatedAt) {
+                    val localContent = fileStorage.loadNoteContent(userId, existingLocal.id)
+
+                    if (localContent == null || localContent == existingLocal.content) {
+                        val updatedNote = existingLocal.copy(
+                            title = serverNote.title,
+                            type = serverNote.type,
+                            updatedAt = serverNote.updatedAt,
+                            isDeleted = serverNote.isDeleted,
+                            filePath = serverNote.filePath
+                        )
+                        dao.insert(updatedNote)
+                        downloadNoteContent(userId, serverNote.id, token)
+                        Log.d(TAG, "UPDATED from server: ${serverNote.title}")
+                    } else {
+                        Log.d(TAG, "KEEP local version (edited): ${serverNote.title}")
+                        if (NetworkUtil.isOnline(context)) {
+                            updateNoteContent(existingLocal.id, userId, localContent)
+                        }
                     }
                 }
             }
 
-            // Добавляем новые заметки с сервера, которых нет локально
-            serverNotes.forEach { server ->
-                val existsLocally = localNotes.any {
-                    it.serverId == server.id || it.id == server.id
-                }
-                if (!existsLocally) {
-                    dao.insert(server.toEntity())
+            syncedLocalNotes.forEach { local ->
+                if (!local.isDeleted) {
+                    val existsOnServer = serverNotes.any { it.id == local.serverId }
+                    if (!existsOnServer) {
+                        dao.delete(local.id)
+                        fileStorage.deleteNoteFile(userId, local.id)
+                        Log.d(TAG, "REMOVED deleted server note: ${local.title}")
+                    }
                 }
             }
 

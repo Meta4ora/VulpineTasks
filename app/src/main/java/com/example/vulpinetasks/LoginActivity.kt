@@ -45,7 +45,6 @@ class LoginActivity : AppCompatActivity() {
                 val userUserId = tokenManager.getUserId()
                 val guestUserId = tokenManager.getGuestUserId()
 
-                // Копируем заметки пользователя гостю (старые гостевые удалятся)
                 if (userUserId != null && guestUserId != null) {
                     AppGraph.notesRepository.copyUserNotesToGuest(userUserId, guestUserId)
                 }
@@ -66,7 +65,6 @@ class LoginActivity : AppCompatActivity() {
                 val userId = tokenManager.getUserId()
                 val guestUserId = tokenManager.getGuestUserId()
 
-                // Если был залогинен - копируем заметки гостю
                 if (!tokenManager.isGuest() && userId != null) {
                     AppGraph.notesRepository.copyUserNotesToGuest(userId, guestUserId)
                 }
@@ -125,21 +123,18 @@ class LoginActivity : AppCompatActivity() {
                 }
                 password != confirmPassword -> {
                     toast("Пароли не совпадают")
-                    // Визуальная индикация ошибки
                     dialogBinding.dialogPasswordLayout.error = "Пароли не совпадают"
                     dialogBinding.dialogConfirmPasswordLayout.error = "Пароли не совпадают"
                     return@setOnClickListener
                 }
             }
 
-            // Сброс ошибок
             dialogBinding.dialogPasswordLayout.error = null
             dialogBinding.dialogConfirmPasswordLayout.error = null
 
             performRegistration(email, password, dialogBinding)
         }
 
-        // Очистка ошибок при вводе
         dialogBinding.dialogPassword.setOnFocusChangeListener { _, hasFocus ->
             if (hasFocus) dialogBinding.dialogPasswordLayout.error = null
         }
@@ -158,7 +153,6 @@ class LoginActivity : AppCompatActivity() {
     ) {
         lifecycleScope.launch {
             try {
-                // Показываем индикатор загрузки
                 binding.dialogRegisterButton.isEnabled = false
                 binding.dialogRegisterButton.text = "Регистрация..."
 
@@ -167,14 +161,12 @@ class LoginActivity : AppCompatActivity() {
                 toast("Регистрация успешна! Теперь войдите.")
                 registerDialog?.dismiss()
 
-                // Автоматически заполняем поля входа
                 this@LoginActivity.binding.email.setText(email)
                 this@LoginActivity.binding.password.setText(password)
 
             } catch (e: Exception) {
                 e.printStackTrace()
 
-                // Обработка ошибок
                 val errorMessage = when {
                     e.message?.contains("already exists") == true ->
                         "Пользователь с таким email уже существует"
@@ -185,7 +177,6 @@ class LoginActivity : AppCompatActivity() {
 
                 toast(errorMessage)
 
-                // Возвращаем кнопку в обычное состояние
                 binding.dialogRegisterButton.isEnabled = true
                 binding.dialogRegisterButton.text = "Зарегистрироваться"
             }
@@ -227,11 +218,11 @@ class LoginActivity : AppCompatActivity() {
                 tokenManager.saveEmail(email)
                 tokenManager.setGuestMode(false)
 
-                // Мигрируем гостевые заметки (после миграции гостевые удалятся)
+                AppGraph.notesRepository.fetchFromServer(res.userId)
+
                 AppGraph.notesRepository.migrateGuestNotesToUser(guestUserId, res.userId)
 
-                // Загружаем с сервера
-                AppGraph.notesRepository.fetchFromServer(res.userId)
+                AppGraph.notesRepository.syncLocalChangesToServer(res.userId)
 
                 startActivity(Intent(this@LoginActivity, MainActivity::class.java))
                 finish()

@@ -10,8 +10,10 @@ data class NoteEntity(
     val userId: String,
     val title: String,
     val type: String,
+    val content: String = "",
     val createdAt: Long,
     val updatedAt: Long,
     val isDeleted: Boolean = false,
-    val serverId: String? = null
+    val serverId: String? = null,
+    val filePath: String? = null
 )
