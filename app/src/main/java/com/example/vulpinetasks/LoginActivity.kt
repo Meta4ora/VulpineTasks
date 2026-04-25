@@ -1,5 +1,6 @@
 package com.example.vulpinetasks
 
+import android.app.Dialog
 import android.content.Intent
 import android.os.Bundle
 import android.view.View
@@ -8,13 +9,16 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import com.example.vulpinetasks.backend.*
 import com.example.vulpinetasks.databinding.ActivityLoginBinding
+import com.example.vulpinetasks.databinding.DialogRegisterBinding
 import com.example.vulpinetasks.room.AppGraph
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import kotlinx.coroutines.launch
 
 class LoginActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityLoginBinding
     private lateinit var tokenManager: TokenManager
+    private var registerDialog: Dialog? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -34,7 +38,7 @@ class LoginActivity : AppCompatActivity() {
 
     private fun setupListeners() {
         binding.loginButton.setOnClickListener { login() }
-        binding.registerButton.setOnClickListener { register() }
+        binding.registerButton.setOnClickListener { showRegisterDialog() }
 
         binding.logoutButton.setOnClickListener {
             lifecycleScope.launch {
@@ -72,6 +76,118 @@ class LoginActivity : AppCompatActivity() {
 
                 startActivity(Intent(this@LoginActivity, MainActivity::class.java))
                 finish()
+            }
+        }
+    }
+
+    private fun showRegisterDialog() {
+        val dialogBinding = DialogRegisterBinding.inflate(layoutInflater)
+
+        registerDialog = Dialog(this).apply {
+            setContentView(dialogBinding.root)
+            setCancelable(true)
+            window?.setBackgroundDrawableResource(android.R.color.transparent)
+
+            // Настройка ширины диалога
+            window?.setLayout(
+                (resources.displayMetrics.widthPixels * 0.9).toInt(),
+                android.view.ViewGroup.LayoutParams.WRAP_CONTENT
+            )
+        }
+
+        // Обработчики кнопок
+        dialogBinding.dialogCancelButton.setOnClickListener {
+            registerDialog?.dismiss()
+        }
+
+        dialogBinding.dialogRegisterButton.setOnClickListener {
+            val email = dialogBinding.dialogEmail.text.toString().trim()
+            val password = dialogBinding.dialogPassword.text.toString().trim()
+            val confirmPassword = dialogBinding.dialogConfirmPassword.text.toString().trim()
+
+            // Валидация
+            when {
+                email.isBlank() -> {
+                    toast("Введите email")
+                    return@setOnClickListener
+                }
+                password.isBlank() -> {
+                    toast("Введите пароль")
+                    return@setOnClickListener
+                }
+                password.length < 6 -> {
+                    toast("Пароль должен содержать минимум 6 символов")
+                    return@setOnClickListener
+                }
+                confirmPassword.isBlank() -> {
+                    toast("Подтвердите пароль")
+                    return@setOnClickListener
+                }
+                password != confirmPassword -> {
+                    toast("Пароли не совпадают")
+                    // Визуальная индикация ошибки
+                    dialogBinding.dialogPasswordLayout.error = "Пароли не совпадают"
+                    dialogBinding.dialogConfirmPasswordLayout.error = "Пароли не совпадают"
+                    return@setOnClickListener
+                }
+            }
+
+            // Сброс ошибок
+            dialogBinding.dialogPasswordLayout.error = null
+            dialogBinding.dialogConfirmPasswordLayout.error = null
+
+            performRegistration(email, password, dialogBinding)
+        }
+
+        // Очистка ошибок при вводе
+        dialogBinding.dialogPassword.setOnFocusChangeListener { _, hasFocus ->
+            if (hasFocus) dialogBinding.dialogPasswordLayout.error = null
+        }
+
+        dialogBinding.dialogConfirmPassword.setOnFocusChangeListener { _, hasFocus ->
+            if (hasFocus) dialogBinding.dialogConfirmPasswordLayout.error = null
+        }
+
+        registerDialog?.show()
+    }
+
+    private fun performRegistration(
+        email: String,
+        password: String,
+        binding: DialogRegisterBinding
+    ) {
+        lifecycleScope.launch {
+            try {
+                // Показываем индикатор загрузки
+                binding.dialogRegisterButton.isEnabled = false
+                binding.dialogRegisterButton.text = "Регистрация..."
+
+                val response = RetrofitClient.api.register(AuthRequest(email, password))
+
+                toast("Регистрация успешна! Теперь войдите.")
+                registerDialog?.dismiss()
+
+                // Автоматически заполняем поля входа
+                this@LoginActivity.binding.email.setText(email)
+                this@LoginActivity.binding.password.setText(password)
+
+            } catch (e: Exception) {
+                e.printStackTrace()
+
+                // Обработка ошибок
+                val errorMessage = when {
+                    e.message?.contains("already exists") == true ->
+                        "Пользователь с таким email уже существует"
+                    e.message?.contains("network") == true ->
+                        "Ошибка сети. Проверьте подключение"
+                    else -> "Ошибка регистрации: ${e.message}"
+                }
+
+                toast(errorMessage)
+
+                // Возвращаем кнопку в обычное состояние
+                binding.dialogRegisterButton.isEnabled = true
+                binding.dialogRegisterButton.text = "Зарегистрироваться"
             }
         }
     }
@@ -127,27 +243,12 @@ class LoginActivity : AppCompatActivity() {
         }
     }
 
-    private fun register() {
-        val email = binding.email.text.toString().trim()
-        val password = binding.password.text.toString().trim()
-
-        if (email.isBlank() || password.isBlank()) {
-            toast("Введите email и пароль")
-            return
-        }
-
-        lifecycleScope.launch {
-            try {
-                RetrofitClient.api.register(AuthRequest(email, password))
-                toast("Регистрация успешна. Теперь войдите.")
-            } catch (e: Exception) {
-                e.printStackTrace()
-                toast("Ошибка регистрации: ${e.message}")
-            }
-        }
-    }
-
     private fun toast(msg: String) {
         Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        registerDialog?.dismiss()
     }
 }
