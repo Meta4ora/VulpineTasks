@@ -1,6 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<androidx.coordinatorlayout.widget.CoordinatorLayout
-    xmlns:android="http://schemas.android.com/apk/res/android"
+<androidx.coordinatorlayout.widget.CoordinatorLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
@@ -20,27 +19,85 @@
 
     </com.google.android.material.appbar.AppBarLayout>
 
-    <ScrollView
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:layout_marginTop="?attr/actionBarSize"
-        android:padding="16dp">
+        android:orientation="vertical">
 
-        <com.google.android.material.textfield.TextInputEditText
-            android:id="@+id/note_content"
+        <!-- Секция с вложенными заметками -->
+        <LinearLayout
+            android:id="@+id/tags_section"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:background="@android:color/white"
-            android:gravity="top"
-            android:inputType="textMultiLine"
-            android:minHeight="400dp"
-            android:padding="16dp"
-            android:textSize="16sp"
-            android:textColor="#212121"
-            android:textColorHint="#9E9E9E"
-            android:lineSpacingExtra="4dp" />
+            android:orientation="vertical"
+            android:padding="12dp"
+            android:background="#FFFFFF">
 
-    </ScrollView>
+            <TextView
+                android:id="@+id/tags_title"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Вложенные заметки"
+                android:textSize="14sp"
+                android:textColor="#666666"
+                android:textStyle="bold"
+                android:layout_marginBottom="8dp" />
+
+            <HorizontalScrollView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="8dp"
+                android:scrollbars="none">
+
+                <androidx.recyclerview.widget.RecyclerView
+                    android:id="@+id/child_notes_recycler_view"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal" />
+
+            </HorizontalScrollView>
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/add_tag_button"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="+ Добавить вложенную заметку"
+                android:textSize="12sp"
+                style="@style/Widget.Material3.Button.TextButton" />
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:layout_marginTop="8dp"
+                android:background="#E0E0E0" />
+
+        </LinearLayout>
+
+        <!-- Содержимое заметки -->
+        <ScrollView
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:padding="16dp">
+
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/note_content"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@android:color/white"
+                android:gravity="top"
+                android:inputType="textMultiLine"
+                android:minHeight="400dp"
+                android:padding="16dp"
+                android:textSize="16sp"
+                android:textColor="#212121"
+                android:textColorHint="#9E9E9E"
+                android:lineSpacingExtra="4dp" />
+
+        </ScrollView>
+
+    </LinearLayout>
 
     <com.google.android.material.floatingactionbutton.FloatingActionButton
         android:id="@+id/fab_save"

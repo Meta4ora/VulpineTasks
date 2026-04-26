@@ -15,5 +15,6 @@ data class NoteEntity(
     val updatedAt: Long,
     val isDeleted: Boolean = false,
     val serverId: String? = null,
-    val filePath: String? = null
+    val filePath: String? = null,
+    val parentId: String? = null
 )

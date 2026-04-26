@@ -39,9 +39,8 @@ class MainActivity : AppCompatActivity() {
         observeNotes()
         setupDrawer()
 
-        // Загружаем с сервера только если не гость
-        if (!tokenManager.isGuest()) {
-            lifecycleScope.launch {
+        lifecycleScope.launch {
+            if (!tokenManager.isGuest()) {
                 repo.fetchFromServer(userId)
             }
         }
@@ -85,6 +84,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun observeNotes() {
         lifecycleScope.launch {
+            // Показываем ВСЕ заметки (не только корневые)
             repo.observeNotes(userId).collect { notes ->
                 adapter.submitList(notes)
             }

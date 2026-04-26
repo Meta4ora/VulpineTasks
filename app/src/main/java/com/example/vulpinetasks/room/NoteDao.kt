@@ -8,8 +8,7 @@ interface NoteDao {
 
     @Query("""
         SELECT * FROM notes 
-        WHERE userId = :userId AND isDeleted = 0 
-        ORDER BY updatedAt DESC
+        WHERE userId = :userId AND isDeleted = 0 ORDER BY updatedAt DESC
     """)
     fun getNotes(userId: String): Flow<List<NoteEntity>>
 
@@ -38,9 +37,6 @@ interface NoteDao {
     @Query("SELECT * FROM notes WHERE userId = :userId AND serverId IS NULL")
     suspend fun getUnsyncedNotes(userId: String): List<NoteEntity>
 
-    @Query("SELECT * FROM notes WHERE userId = :userId AND isDeleted = 0")
-    suspend fun getNotesForMigration(userId: String): List<NoteEntity>
-
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(note: NoteEntity)
 
@@ -65,7 +61,6 @@ interface NoteDao {
     @Query("UPDATE notes SET userId = :newUserId WHERE userId = :oldUserId")
     suspend fun migrateUserId(oldUserId: String, newUserId: String)
 
-    // Копирование заметок от одного пользователя другому
     @Query("""
         INSERT OR REPLACE INTO notes (id, userId, title, type, createdAt, updatedAt, isDeleted, serverId)
         SELECT 
@@ -81,4 +76,16 @@ interface NoteDao {
         WHERE userId = :sourceUserId AND isDeleted = 0
     """)
     suspend fun copyNotesToUser(sourceUserId: String, newUserId: String)
+
+    // Обновить parentId заметки
+    @Query("UPDATE notes SET parentId = :parentId, updatedAt = :time WHERE id = :noteId")
+    suspend fun updateParentId(noteId: String, parentId: String?, time: Long = System.currentTimeMillis())
+
+    // Получить дочерние заметки (у которых parentId = parentId)
+    @Query("SELECT * FROM notes WHERE parentId = :parentId AND userId = :userId AND isDeleted = 0 ORDER BY title ASC")
+    suspend fun getChildNotes(parentId: String, userId: String): List<NoteEntity>
+
+    // Получить ID дочерних заметок
+    @Query("SELECT id FROM notes WHERE parentId = :parentId AND isDeleted = 0")
+    suspend fun getChildNotesIds(parentId: String): List<String>
 }

@@ -24,7 +24,8 @@ data class UpdateNoteRequest(
     val title: String? = null,
     val type: String? = null,
     val content: String? = null,
-    val isDeleted: Boolean? = null
+    val isDeleted: Boolean? = null,
+    val parentId: String? = null
 )
 
 data class NoteDto(
@@ -35,6 +36,23 @@ data class NoteDto(
     val content: String = "",
     val parentId: String? = null,
     val filePath: String? = null,
+    val createdAt: Long,
+    val updatedAt: Long,
+    val isDeleted: Boolean = false
+)
+
+data class NoteRelationDto(
+    val noteId: String,
+    val parentNoteId: String
+)
+
+data class NoteWithRelationsDto(
+    val id: String,
+    val userId: String,
+    val title: String,
+    val type: String,
+    val content: String = "",
+    val parentIds: List<String> = emptyList(),
     val createdAt: Long,
     val updatedAt: Long,
     val isDeleted: Boolean = false
