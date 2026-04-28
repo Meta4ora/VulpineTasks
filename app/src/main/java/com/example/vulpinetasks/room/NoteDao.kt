@@ -62,7 +62,7 @@ interface NoteDao {
     suspend fun migrateUserId(oldUserId: String, newUserId: String)
 
     @Query("""
-        INSERT OR REPLACE INTO notes (id, userId, title, type, createdAt, updatedAt, isDeleted, serverId)
+        INSERT OR REPLACE INTO notes (id, userId, title, type, createdAt, updatedAt, isDeleted, serverId, filePath)
         SELECT 
             id, 
             :newUserId AS userId, 
@@ -71,21 +71,56 @@ interface NoteDao {
             createdAt, 
             updatedAt, 
             isDeleted, 
-            NULL AS serverId
+            NULL AS serverId,
+            NULL AS filePath
         FROM notes 
         WHERE userId = :sourceUserId AND isDeleted = 0
     """)
     suspend fun copyNotesToUser(sourceUserId: String, newUserId: String)
 
-    // Обновить parentId заметки
-    @Query("UPDATE notes SET parentId = :parentId, updatedAt = :time WHERE id = :noteId")
-    suspend fun updateParentId(noteId: String, parentId: String?, time: Long = System.currentTimeMillis())
+    // ========== Методы для работы со связями (many-to-many) ==========
 
-    // Получить дочерние заметки (у которых parentId = parentId)
-    @Query("SELECT * FROM notes WHERE parentId = :parentId AND userId = :userId AND isDeleted = 0 ORDER BY title ASC")
-    suspend fun getChildNotes(parentId: String, userId: String): List<NoteEntity>
+    @Query("""
+        SELECT n.* FROM notes n
+        INNER JOIN note_relations nr ON n.id = nr.parentNoteId
+        WHERE nr.noteId = :noteId AND n.isDeleted = 0
+        ORDER BY n.title ASC
+    """)
+    suspend fun getParentsForNote(noteId: String): List<NoteEntity>
 
-    // Получить ID дочерних заметок
-    @Query("SELECT id FROM notes WHERE parentId = :parentId AND isDeleted = 0")
-    suspend fun getChildNotesIds(parentId: String): List<String>
+    @Query("""
+        SELECT n.* FROM notes n
+        INNER JOIN note_relations nr ON n.id = nr.noteId
+        WHERE nr.parentNoteId = :parentId AND n.isDeleted = 0
+        ORDER BY n.title ASC
+    """)
+    suspend fun getChildrenForNote(parentId: String): List<NoteEntity>
+
+    @Query("SELECT parentNoteId FROM note_relations WHERE noteId = :noteId")
+    suspend fun getParentIdsForNote(noteId: String): List<String>
+
+    @Query("SELECT noteId FROM note_relations WHERE parentNoteId = :parentId")
+    suspend fun getChildrenIdsForNote(parentId: String): List<String>
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun addRelation(relation: NoteRelationEntity)
+
+    @Query("DELETE FROM note_relations WHERE noteId = :noteId AND parentNoteId = :parentId")
+    suspend fun removeRelation(noteId: String, parentId: String)
+
+    @Query("DELETE FROM note_relations WHERE noteId = :noteId")
+    suspend fun removeAllRelationsForNote(noteId: String)
+
+    @Query("SELECT COUNT(*) > 0 FROM note_relations WHERE noteId = :noteId AND parentNoteId = :parentId")
+    suspend fun hasRelation(noteId: String, parentId: String): Boolean
+
+    @Query("DELETE FROM note_relations")
+    suspend fun clearAllRelations()
+
+    @Query("""
+    SELECT n.* FROM notes n
+    INNER JOIN note_relations nr ON n.id = nr.noteId
+    WHERE nr.parentNoteId = :parentId
+""")
+    suspend fun getNotesReferencingParentId(parentId: String): List<NoteEntity>
 }

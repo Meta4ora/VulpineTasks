@@ -13,11 +13,10 @@ data class AuthResponse(
     val userId: String
 )
 
-// CreateNoteRequest с parentId (как на сервере)
 data class CreateNoteRequest(
     val title: String,
     val type: String,
-    val parentId: String? = null
+    val parentIds: List<String> = emptyList()
 )
 
 data class UpdateNoteRequest(
@@ -25,7 +24,7 @@ data class UpdateNoteRequest(
     val type: String? = null,
     val content: String? = null,
     val isDeleted: Boolean? = null,
-    val parentId: String? = null
+    val parentIds: List<String>? = null
 )
 
 data class NoteDto(
@@ -34,7 +33,7 @@ data class NoteDto(
     val title: String,
     val type: String,
     val content: String = "",
-    val parentId: String? = null,
+    val parentIds: List<String> = emptyList(),
     val filePath: String? = null,
     val createdAt: Long,
     val updatedAt: Long,

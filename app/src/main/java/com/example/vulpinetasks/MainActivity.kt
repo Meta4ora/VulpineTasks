@@ -2,7 +2,6 @@ package com.example.vulpinetasks
 
 import android.content.Intent
 import android.os.Bundle
-import android.util.Log
 import android.widget.EditText
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
@@ -39,8 +38,8 @@ class MainActivity : AppCompatActivity() {
         observeNotes()
         setupDrawer()
 
-        lifecycleScope.launch {
-            if (!tokenManager.isGuest()) {
+        if (!tokenManager.isGuest()) {
+            lifecycleScope.launch {
                 repo.fetchFromServer(userId)
             }
         }
@@ -84,7 +83,6 @@ class MainActivity : AppCompatActivity() {
 
     private fun observeNotes() {
         lifecycleScope.launch {
-            // Показываем ВСЕ заметки (не только корневые)
             repo.observeNotes(userId).collect { notes ->
                 adapter.submitList(notes)
             }

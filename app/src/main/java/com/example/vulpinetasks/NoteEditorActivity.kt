@@ -160,29 +160,20 @@ class NoteEditorActivity : AppCompatActivity() {
                 return@launch
             }
 
-            // Получаем ВСЕ заметки пользователя, которые НЕ являются текущей
-            // и у которых нет parentId (можно сделать вложенными)
             val allNotes = AppGraph.notesRepository.getAllNotes(currentUserId)
             Log.d(TAG, "All notes count: ${allNotes.size}")
 
-            // Получаем ID заметок, которые уже являются дочерними для текущей
             val existingChildIds = AppGraph.notesRepository.getChildNotesIds(currentNoteId)
             Log.d(TAG, "Existing child IDs: $existingChildIds")
 
             // Фильтруем заметки, которые можно добавить:
             // 1. Не текущая заметка
             // 2. Не уже дочерняя
-            // 3. Не является родителем текущей (чтобы не было циклических ссылок)
             val availableNotes = allNotes.filter { note ->
-                note.id != currentNoteId &&
-                        note.id !in existingChildIds &&
-                        note.parentId != currentNoteId
+                note.id != currentNoteId && note.id !in existingChildIds
             }
 
             Log.d(TAG, "Available notes to add as children: ${availableNotes.size}")
-            availableNotes.forEach { note ->
-                Log.d(TAG, "  Available: ${note.title} (${note.id})")
-            }
 
             if (availableNotes.isEmpty()) {
                 Toast.makeText(

@@ -1,5 +1,3 @@
-// mappers/NoteMappers.kt - создайте файл, если его нет
-
 package com.example.vulpinetasks.mappers
 
 import com.example.vulpinetasks.backend.NoteDto
@@ -12,7 +10,7 @@ fun NoteEntity.toDto(): NoteDto {
         title = this.title,
         type = this.type,
         content = this.content,
-        parentId = null,
+        parentIds = emptyList(),  // Связи теперь в отдельной таблице
         filePath = this.filePath,
         createdAt = this.createdAt,
         updatedAt = this.updatedAt,

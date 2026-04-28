@@ -135,8 +135,7 @@ class NotesRepository(
             updatedAt = now,
             isDeleted = false,
             serverId = null,
-            filePath = null,
-            parentId = null
+            filePath = null
         )
 
         dao.insert(localNote)
@@ -153,7 +152,7 @@ class NotesRepository(
 
             val serverNote = api.createNote(
                 "Bearer $token",
-                CreateNoteRequest(localNote.title, localNote.type, null)
+                CreateNoteRequest(localNote.title, localNote.type, emptyList())
             )
 
             val updatedNote = localNote.copy(
@@ -205,8 +204,7 @@ class NotesRepository(
                     updatedAt = note.updatedAt,
                     isDeleted = false,
                     serverId = null,
-                    filePath = null,
-                    parentId = null
+                    filePath = null
                 )
                 dao.insert(guestNote)
 
@@ -243,19 +241,12 @@ class NotesRepository(
                 it.title.lowercase().trim()
             }
 
-            val userNotesByContent = userNotes.filter { it.content.isNotEmpty() }
-                .associateBy { it.content.take(100) }
-
             var mergedCount = 0
             var skippedCount = 0
 
             guestNotes.forEach { guestNote ->
                 val titleKey = guestNote.title.lowercase().trim()
-                val contentKey = guestNote.content.take(100)
-
                 val existingNote = userNotesByTitle[titleKey]
-                    ?: userNotesByContent[contentKey]
-                    ?: userNotes.find { it.serverId == guestNote.serverId }
 
                 if (existingNote == null) {
                     val newNote = NoteEntity(
@@ -268,8 +259,7 @@ class NotesRepository(
                         updatedAt = guestNote.updatedAt,
                         isDeleted = false,
                         serverId = null,
-                        filePath = null,
-                        parentId = null
+                        filePath = null
                     )
                     dao.insert(newNote)
 
@@ -326,7 +316,7 @@ class NotesRepository(
                     if (note.serverId == null) {
                         val serverNote = api.createNote(
                             "Bearer $token",
-                            CreateNoteRequest(note.title, note.type, null)
+                            CreateNoteRequest(note.title, note.type, emptyList())
                         )
 
                         if (note.content.isNotEmpty()) {
@@ -353,10 +343,12 @@ class NotesRepository(
                             api.updateNoteContent(note.serverId, "Bearer $token", note.content)
                         }
 
+                        val parentIds = dao.getParentIdsForNote(note.id)
+
                         api.updateNote(
                             note.serverId,
                             "Bearer $token",
-                            UpdateNoteRequest(title = note.title, content = note.content)
+                            UpdateNoteRequest(title = note.title, content = note.content, parentIds = parentIds)
                         )
 
                         val updatedNote = note.copy(updatedAt = System.currentTimeMillis())
@@ -374,27 +366,69 @@ class NotesRepository(
         }
     }
 
+    // ==================== КОРЗИНА ====================
+
+    // Временное хранилище для связей удаленных заметок (на случай восстановления)
+    private val deletedRelationsStore = mutableMapOf<String, Triple<List<String>, List<String>, String?>>()
+
+    private suspend fun saveRelationsForNote(noteId: String, parentIds: List<String>, childIds: List<String>, serverId: String?) {
+        deletedRelationsStore[noteId] = Triple(parentIds, childIds, serverId)
+    }
+
+    private suspend fun clearSavedRelationsForNote(noteId: String) {
+        deletedRelationsStore.remove(noteId)
+    }
+
+    suspend fun clearDeletedRelations() {
+        deletedRelationsStore.clear()
+    }
+
+    /**
+     * Перемещение заметки в корзину
+     * НЕ удаляем связи, только помечаем заметку как isDeleted = true
+     */
     suspend fun moveToTrash(noteId: String) {
         val note = dao.getActiveNoteById(noteId) ?: return
+
+        // Сохраняем связи на случай восстановления (но НЕ удаляем их!)
+        val parentIds = dao.getParentIdsForNote(noteId)
+        val childIds = dao.getChildrenIdsForNote(noteId)
+        saveRelationsForNote(noteId, parentIds, childIds, note.serverId)
 
         val now = System.currentTimeMillis()
         dao.moveToTrash(note.id, now)
 
+        // ВАЖНО: НЕ удаляем связи! Они остаются в таблице note_relations
+
         if (!tokenManager.isGuest() && note.serverId != null) {
             try {
                 val token = tokenManager.getToken() ?: return
-                api.deleteNote(note.serverId, "Bearer $token")
+                // На сервере тоже просто помечаем как удаленную
+                api.updateNote(
+                    note.serverId,
+                    "Bearer $token",
+                    UpdateNoteRequest(isDeleted = true)
+                )
+                Log.d(TAG, "Note moved to trash on server: ${note.title}")
             } catch (e: Exception) {
-                Log.e(TAG, "API DELETE FAILED", e)
+                Log.e(TAG, "Failed to move note to trash on server", e)
             }
         }
     }
 
+    /**
+     * Восстановление заметки из корзины
+     */
     suspend fun restoreFromTrash(noteId: String) {
         val note = dao.getTrashNoteById(noteId) ?: return
 
         val now = System.currentTimeMillis()
+
+        // Просто снимаем флаг isDeleted (связи уже существуют)
         dao.restoreFromTrash(note.id, now)
+
+        // Очищаем временное хранилище
+        clearSavedRelationsForNote(noteId)
 
         if (!tokenManager.isGuest()) {
             syncRestoreToServer(note, now)
@@ -406,39 +440,24 @@ class NotesRepository(
             val token = tokenManager.getToken() ?: return
 
             if (note.serverId != null) {
-                try {
-                    api.updateNote(
-                        note.serverId,
-                        "Bearer $token",
-                        UpdateNoteRequest(isDeleted = false)
-                    )
-                    return
-                } catch (e: Exception) {
-                    Log.w(TAG, "UPDATE RESTORE FAILED", e)
-                }
+                // Получаем актуальные parentIds (они не удалялись)
+                val parentIds = dao.getParentIdsForNote(note.id)
+
+                // Просто снимаем флаг isDeleted
+                api.updateNote(
+                    note.serverId,
+                    "Bearer $token",
+                    UpdateNoteRequest(isDeleted = false, parentIds = parentIds)
+                )
+                Log.d(TAG, "Note restored on server: ${note.title} with parentIds: $parentIds")
+
+                // Обновляем локальную заметку
+                val updatedNote = note.copy(
+                    updatedAt = restoreTime,
+                    isDeleted = false
+                )
+                dao.insert(updatedNote)
             }
-
-            val serverNote = api.createNote(
-                "Bearer $token",
-                CreateNoteRequest(note.title, note.type)
-            )
-
-            val updatedNote = NoteEntity(
-                id = serverNote.id,
-                userId = note.userId,
-                title = serverNote.title,
-                type = serverNote.type,
-                createdAt = serverNote.createdAt,
-                updatedAt = restoreTime,
-                isDeleted = false,
-                serverId = serverNote.id,
-                filePath = null,
-                parentId = null
-            )
-
-            dao.delete(note.id)
-            dao.insert(updatedNote)
-
         } catch (e: Exception) {
             Log.e(TAG, "RESTORE SYNC FAILED", e)
         }
@@ -470,14 +489,66 @@ class NotesRepository(
         }
     }
 
+    /**
+     * ПОЛНОЕ удаление заметки (без возможности восстановления)
+     * ТОЛЬКО ЗДЕСЬ удаляем все связи
+     */
     suspend fun deletePermanently(noteId: String) {
         val note = dao.getNoteById(noteId) ?: return
+
+        // НАХОДИМ ВСЕ ЗАМЕТКИ, КОТОРЫЕ ССЫЛАЮТСЯ НА ЭТУ
+        val referencingNotes = dao.getNotesReferencingParentId(noteId)
+
+        referencingNotes.forEach { refNote ->
+            val parentIds = dao.getParentIdsForNote(refNote.id)
+            val updatedParentIds = parentIds.filter { it != noteId }
+
+            if (updatedParentIds.size != parentIds.size) {
+                // Удаляем старые связи и добавляем обновленные
+                dao.removeAllRelationsForNote(refNote.id)
+                updatedParentIds.forEach { parentId ->
+                    val relation = NoteRelationEntity(
+                        noteId = refNote.id,
+                        parentNoteId = parentId
+                    )
+                    dao.addRelation(relation)
+                }
+
+                // Синхронизируем с сервером
+                if (!tokenManager.isGuest() && refNote.serverId != null) {
+                    try {
+                        val token = tokenManager.getToken() ?: return
+                        api.updateNote(
+                            refNote.serverId,
+                            "Bearer $token",
+                            UpdateNoteRequest(parentIds = updatedParentIds)
+                        )
+                        Log.d(TAG, "Removed reference to deleted note ${noteId} from ${refNote.id}")
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to sync reference removal", e)
+                    }
+                }
+            }
+        }
+
+        // Удаляем все связи самой заметки
+        dao.removeAllRelationsForNote(noteId)
+
+        // Удаляем файл содержимого
+        fileStorage.deleteNoteFile(note.userId, note.id)
+
+        // Удаляем заметку
         dao.delete(noteId)
 
+        // Очищаем временное хранилище
+        clearSavedRelationsForNote(noteId)
+
+        // Удаляем с сервера
         if (!tokenManager.isGuest() && note.serverId != null) {
             try {
                 val token = tokenManager.getToken() ?: return
                 api.deleteNote(note.serverId, "Bearer $token")
+                Log.d(TAG, "Note permanently deleted from server: ${note.title}")
             } catch (e: Exception) {
                 Log.e(TAG, "DELETE PERMANENTLY FAILED", e)
             }
@@ -511,80 +582,44 @@ class NotesRepository(
             val serverNotes = api.getNotes("Bearer $token")
             val localNotes = dao.getAllOnce(userId)
 
-            val syncedLocalNotes = localNotes.filter { it.serverId != null }
-            val unsyncedLocalNotes = localNotes.filter { it.serverId == null }
-
             serverNotes.forEach { serverNote ->
-                val existingLocal = syncedLocalNotes.find {
-                    it.serverId == serverNote.id || it.id == serverNote.id
+                val existingLocal = localNotes.find { local ->
+                    local.serverId == serverNote.id
                 }
 
-                if (existingLocal == null) {
-                    val duplicateByTitle = unsyncedLocalNotes.find {
-                        it.title.equals(serverNote.title, ignoreCase = true)
-                    }
-
-                    if (duplicateByTitle != null) {
-                        val updatedNote = duplicateByTitle.copy(
-                            serverId = serverNote.id,
-                            filePath = serverNote.filePath,
-                            updatedAt = maxOf(duplicateByTitle.updatedAt, serverNote.updatedAt),
-                            parentId = serverNote.parentId
-                        )
-                        dao.insert(updatedNote)
-                        Log.d(TAG, "LINKED local note to server: ${serverNote.title}")
-                    } else {
-                        val newNote = NoteEntity(
-                            id = serverNote.id,
-                            userId = serverNote.userId,
-                            title = serverNote.title,
-                            type = serverNote.type,
-                            content = "",
-                            createdAt = serverNote.createdAt,
-                            updatedAt = serverNote.updatedAt,
-                            isDeleted = serverNote.isDeleted,
-                            serverId = serverNote.id,
-                            filePath = serverNote.filePath,
-                            parentId = serverNote.parentId
-                        )
-                        dao.insert(newNote)
-                        Log.d(TAG, "ADDED new server note: ${serverNote.title}")
-                        downloadNoteContent(userId, serverNote.id, token)
-                    }
-                } else if (serverNote.updatedAt > existingLocal.updatedAt) {
-                    val localContent = fileStorage.loadNoteContent(userId, existingLocal.id)
-
-                    if (localContent == null || localContent == existingLocal.content) {
-                        val updatedNote = existingLocal.copy(
-                            title = serverNote.title,
-                            type = serverNote.type,
-                            updatedAt = serverNote.updatedAt,
-                            isDeleted = serverNote.isDeleted,
-                            filePath = serverNote.filePath,
-                            parentId = serverNote.parentId
-                        )
-                        dao.insert(updatedNote)
-                        downloadNoteContent(userId, serverNote.id, token)
-                        Log.d(TAG, "UPDATED from server: ${serverNote.title}")
-                    } else {
-                        Log.d(TAG, "KEEP local version (edited): ${serverNote.title}")
-                        if (NetworkUtil.isOnline(context)) {
-                            updateNoteContent(existingLocal.id, userId, localContent)
-                        }
-                    }
+                if (existingLocal == null && !serverNote.isDeleted) {
+                    val newNote = NoteEntity(
+                        id = serverNote.id,
+                        userId = serverNote.userId,
+                        title = serverNote.title,
+                        type = serverNote.type,
+                        content = "",
+                        createdAt = serverNote.createdAt,
+                        updatedAt = serverNote.updatedAt,
+                        isDeleted = false,
+                        serverId = serverNote.id,
+                        filePath = serverNote.filePath
+                    )
+                    dao.insert(newNote)
+                    downloadNoteContent(userId, serverNote.id, token)
+                    Log.d(TAG, "ADDED new server note: ${serverNote.title}")
+                } else if (existingLocal != null && serverNote.updatedAt > existingLocal.updatedAt && !serverNote.isDeleted) {
+                    val updatedNote = existingLocal.copy(
+                        title = serverNote.title,
+                        type = serverNote.type,
+                        updatedAt = serverNote.updatedAt,
+                        filePath = serverNote.filePath,
+                        isDeleted = false
+                    )
+                    dao.insert(updatedNote)
+                    Log.d(TAG, "UPDATED existing note: ${serverNote.title}")
+                } else if (existingLocal != null && serverNote.isDeleted && !existingLocal.isDeleted) {
+                    dao.moveToTrash(existingLocal.id, System.currentTimeMillis())
+                    Log.d(TAG, "Note moved to trash due to server deletion: ${serverNote.title}")
                 }
             }
 
-            syncedLocalNotes.forEach { local ->
-                if (!local.isDeleted) {
-                    val existsOnServer = serverNotes.any { it.id == local.serverId }
-                    if (!existsOnServer) {
-                        dao.delete(local.id)
-                        fileStorage.deleteNoteFile(userId, local.id)
-                        Log.d(TAG, "REMOVED deleted server note: ${local.title}")
-                    }
-                }
-            }
+            syncRelationsFromServer(userId)
 
         } catch (e: Exception) {
             Log.e(TAG, "FETCH FAILED", e)
@@ -595,67 +630,118 @@ class NotesRepository(
         return dao.getAllActiveNotes(userId).map { it.toDto() }
     }
 
+    // ========== МЕТОДЫ ДЛЯ РАБОТЫ СО СВЯЗЯМИ ==========
+
     suspend fun getChildNotes(parentId: String, userId: String): List<NoteDto> {
         Log.d(TAG, "getChildNotes: parentId=$parentId, userId=$userId")
-        val childNotes = dao.getChildNotes(parentId, userId)
+        val childNotes = dao.getChildrenForNote(parentId).filter { it.userId == userId && !it.isDeleted }
         Log.d(TAG, "Found ${childNotes.size} child notes")
-        childNotes.forEach { note ->
-            Log.d(TAG, "  Child: ${note.title} (${note.id})")
-        }
         return childNotes.map { it.toDto() }
     }
 
     suspend fun getChildNotesIds(parentId: String): List<String> {
         Log.d(TAG, "getChildNotesIds: parentId=$parentId")
-        return dao.getChildNotesIds(parentId)
+        return dao.getChildrenIdsForNote(parentId)
     }
 
-    suspend fun addParentRelation(noteId: String, parentId: String) {
-        Log.d(TAG, "addParentRelation: $noteId -> $parentId")
-        if (noteId == parentId) {
+    suspend fun getParentNotes(noteId: String, userId: String): List<NoteDto> {
+        Log.d(TAG, "getParentNotes: noteId=$noteId, userId=$userId")
+        val parentNotes = dao.getParentsForNote(noteId).filter { it.userId == userId && !it.isDeleted }
+        Log.d(TAG, "Found ${parentNotes.size} parent notes")
+        parentNotes.forEach { note ->
+            Log.d(TAG, "  Parent: ${note.title} (${note.id})")
+        }
+        return parentNotes.map { it.toDto() }
+    }
+
+    suspend fun addParentRelation(childNoteId: String, parentNoteId: String) {
+        Log.d(TAG, "addParentRelation: $childNoteId -> $parentNoteId")
+        if (childNoteId == parentNoteId) {
             Log.w(TAG, "Cannot add self as parent")
             return
         }
 
-        dao.updateParentId(noteId, parentId)
+        if (dao.hasRelation(childNoteId, parentNoteId)) {
+            Log.w(TAG, "Relation already exists")
+            return
+        }
+
+        val relation = NoteRelationEntity(
+            noteId = childNoteId,
+            parentNoteId = parentNoteId
+        )
+        dao.addRelation(relation)
         Log.d(TAG, "Parent relation added locally")
 
         if (!tokenManager.isGuest() && NetworkUtil.isOnline(context)) {
             try {
                 val token = tokenManager.getToken() ?: return
-                val note = dao.getNoteById(noteId)
+                val allParentIds = dao.getParentIdsForNote(childNoteId)
 
                 api.updateNote(
-                    noteId,
+                    childNoteId,
                     "Bearer $token",
-                    UpdateNoteRequest(parentId = parentId)
+                    UpdateNoteRequest(parentIds = allParentIds)
                 )
-                Log.d(TAG, "ParentId synced to server: $noteId -> $parentId")
+                Log.d(TAG, "ParentIds synced to server: $childNoteId -> $allParentIds")
             } catch (e: Exception) {
-                Log.e(TAG, "Failed to sync parentId to server", e)
+                Log.e(TAG, "Failed to sync parentIds to server", e)
             }
         }
     }
 
-    suspend fun removeParentRelation(noteId: String, parentId: String) {
-        Log.d(TAG, "removeParentRelation: $noteId -> $parentId")
+    suspend fun removeParentRelation(childNoteId: String, parentNoteId: String) {
+        Log.d(TAG, "removeParentRelation: $childNoteId -> $parentNoteId")
 
-        dao.updateParentId(noteId, null)
+        dao.removeRelation(childNoteId, parentNoteId)
         Log.d(TAG, "Parent relation removed locally")
 
         if (!tokenManager.isGuest() && NetworkUtil.isOnline(context)) {
             try {
                 val token = tokenManager.getToken() ?: return
+                val allParentIds = dao.getParentIdsForNote(childNoteId)
 
                 api.updateNote(
-                    noteId,
+                    childNoteId,
                     "Bearer $token",
-                    UpdateNoteRequest(parentId = null)
+                    UpdateNoteRequest(parentIds = allParentIds)
                 )
-                Log.d(TAG, "ParentId removed from server: $noteId")
+                Log.d(TAG, "ParentIds updated on server: $childNoteId -> $allParentIds")
             } catch (e: Exception) {
-                Log.e(TAG, "Failed to remove parentId from server", e)
+                Log.e(TAG, "Failed to update parentIds on server", e)
             }
+        }
+    }
+
+    suspend fun syncRelationsFromServer(userId: String) {
+        if (tokenManager.isGuest()) return
+
+        val token = tokenManager.getToken() ?: return
+
+        try {
+            val serverNotes = api.getNotes("Bearer $token")
+
+            dao.clearAllRelations()
+
+            serverNotes.forEach { serverNote ->
+                if (serverNote.isDeleted) return@forEach
+
+                serverNote.parentIds.forEach { parentId ->
+                    var cleanParentId = parentId.removeSurrounding("{", "}")
+                    if (cleanParentId.isNotEmpty() && cleanParentId != "[]") {
+                        val relation = NoteRelationEntity(
+                            noteId = serverNote.id,
+                            parentNoteId = cleanParentId
+                        )
+                        dao.addRelation(relation)
+                        Log.d(TAG, "Added relation: ${serverNote.id} -> $cleanParentId")
+                    }
+                }
+            }
+
+            Log.d(TAG, "Relations synced from server")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to sync relations", e)
         }
     }
 }
