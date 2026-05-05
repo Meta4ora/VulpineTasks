@@ -106,7 +106,6 @@ class NotesRepository(
             markNoteAsDirty(noteId)
         }
     }
-
     private suspend fun markNoteAsDirty(noteId: String) {
         Log.d(TAG, "Note $noteId marked as dirty (needs sync)")
     }
@@ -123,7 +122,7 @@ class NotesRepository(
     ) {
         val localId = UUID.randomUUID().toString()
         val now = System.currentTimeMillis()
-        val defaultContent = generateDefaultContent(title)
+        val defaultContent = if (type == "task") "[]" else "# $title\n\n"
 
         val localNote = NoteEntity(
             id = localId,
@@ -782,5 +781,9 @@ class NotesRepository(
         } else {
             markNoteAsDirty(noteId)
         }
+    }
+
+    suspend fun getNoteByIdRaw(noteId: String): NoteEntity? {
+        return dao.getNoteById(noteId)
     }
 }

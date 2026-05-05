@@ -40,6 +40,12 @@ data class NoteDto(
     val isDeleted: Boolean = false
 )
 
+data class SubTaskDto(
+    val id: String,
+    val title: String,
+    val isCompleted: Boolean = false
+)
+
 data class NoteRelationDto(
     val noteId: String,
     val parentNoteId: String

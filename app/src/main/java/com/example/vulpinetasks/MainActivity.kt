@@ -50,7 +50,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         binding.addNoteButton.setOnClickListener {
-            showCreateDialog()
+            showTypeSelectionDialog()
         }
 
         binding.syncButton.setOnClickListener {
@@ -119,12 +119,33 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun showCreateDialog() {
-        val input = EditText(this)
-        input.hint = "Введите заголовок заметки"
+    /**
+     * Диалог выбора типа создаваемой заметки
+     */
+    private fun showTypeSelectionDialog() {
+        val options = arrayOf("📝 Заметка", "✅ Задача")
 
         AlertDialog.Builder(this)
-            .setTitle("Новая заметка")
+            .setTitle("Создать")
+            .setItems(options) { _, which ->
+                when (which) {
+                    0 -> showCreateNoteDialog("note")
+                    1 -> showCreateNoteDialog("task")
+                }
+            }
+            .setNegativeButton("Отмена", null)
+            .show()
+    }
+
+    /**
+     * Диалог создания заметки/задачи с вводом заголовка
+     */
+    private fun showCreateNoteDialog(type: String) {
+        val input = EditText(this)
+        input.hint = if (type == "note") "Введите заголовок заметки" else "Введите название задачи"
+
+        AlertDialog.Builder(this)
+            .setTitle(if (type == "note") "Новая заметка" else "Новая задача")
             .setView(input)
             .setPositiveButton("Создать") { _, _ ->
                 val text = input.text.toString().trim()
@@ -134,17 +155,48 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 lifecycleScope.launch {
-                    repo.createNote(
-                        title = text,
-                        type = "note",
-                        userId = userId,
-                        isOnline = NetworkUtil.isOnline(this@MainActivity)
-                    )
-                    toast("Заметка создана")
+                    try {
+                        // Создаем заметку/задачу с соответствующим типом
+                        val defaultContent = if (type == "note") {
+                            "# $text\n\n"
+                        } else {
+                            "[]"  // Пустой JSON массив для подзадач
+                        }
+
+                        repo.createNote(
+                            title = text,
+                            type = type,
+                            userId = userId,
+                            isOnline = NetworkUtil.isOnline(this@MainActivity)
+                        )
+
+                        // Ждем небольшую задержку для завершения операции
+                        kotlinx.coroutines.delay(100)
+
+                        // Находим созданную заметку по заголовку и обновляем содержимое
+                        val createdNote = getNoteByTitle(text)
+                        if (createdNote != null) {
+                            repo.updateNoteContent(createdNote.id, userId, defaultContent)
+                            toast(if (type == "note") "Заметка создана" else "Задача создана")
+                        } else {
+                            toast(if (type == "note") "Заметка создана" else "Задача создана")
+                        }
+                    } catch (e: Exception) {
+                        toast("Ошибка при создании")
+                        e.printStackTrace()
+                    }
                 }
             }
             .setNegativeButton("Отмена", null)
             .show()
+    }
+
+    /**
+     * Найти заметку по заголовку
+     */
+    private suspend fun getNoteByTitle(title: String): NoteDto? {
+        val notes = repo.getAllNotes(userId)
+        return notes.find { it.title == title }
     }
 
     private fun showRenameDialog(note: NoteDto) {
