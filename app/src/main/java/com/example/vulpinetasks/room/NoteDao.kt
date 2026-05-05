@@ -117,6 +117,9 @@ interface NoteDao {
     @Query("DELETE FROM note_relations")
     suspend fun clearAllRelations()
 
+    @Query("SELECT parentNoteId FROM note_relations WHERE noteId = :noteId")
+    suspend fun getParentIdsForNoteInfo(noteId: String): List<String>
+
     @Query("""
     SELECT n.* FROM notes n
     INNER JOIN note_relations nr ON n.id = nr.noteId

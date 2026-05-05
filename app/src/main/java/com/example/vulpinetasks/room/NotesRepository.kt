@@ -744,4 +744,9 @@ class NotesRepository(
             Log.e(TAG, "Failed to sync relations", e)
         }
     }
+
+    suspend fun getParentIdsForNote(noteId: String): List<String> {
+        Log.d(TAG, "getParentIdsForNoteInfo: noteId=$noteId")
+        return dao.getParentIdsForNoteInfo(noteId)
+    }
 }

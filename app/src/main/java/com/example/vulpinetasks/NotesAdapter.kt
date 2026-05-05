@@ -12,7 +12,8 @@ import com.example.vulpinetasks.databinding.ItemNoteBinding
 
 class NotesAdapter(
     private val onOpen: (NoteDto) -> Unit,
-    private val onTrash: (NoteDto) -> Unit
+    private val onTrash: (NoteDto) -> Unit,
+    private val onInfo: (NoteDto) -> Unit
 ) : ListAdapter<NoteDto, NotesAdapter.VH>(Diff) {
 
     object Diff : DiffUtil.ItemCallback<NoteDto>() {
@@ -34,9 +35,13 @@ class NotesAdapter(
             b.noteMenuButton.setOnClickListener { v: View ->
                 val popup = PopupMenu(v.context, v)
                 popup.menu.add("В корзину")
+                popup.menu.add("Информация")
 
-                popup.setOnMenuItemClickListener {
-                    onTrash(note)
+                popup.setOnMenuItemClickListener { menuItem ->
+                    when (menuItem.title) {
+                        "В корзину" -> onTrash(note)
+                        "Информация" -> onInfo(note)
+                    }
                     true
                 }
 
