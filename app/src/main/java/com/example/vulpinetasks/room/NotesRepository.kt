@@ -745,8 +745,42 @@ class NotesRepository(
         }
     }
 
-    suspend fun getParentIdsForNote(noteId: String): List<String> {
+    suspend fun getParentIdsForNoteInfo(noteId: String): List<String> {
         Log.d(TAG, "getParentIdsForNoteInfo: noteId=$noteId")
         return dao.getParentIdsForNoteInfo(noteId)
+    }
+
+    suspend fun updateNoteTitle(noteId: String, newTitle: String) {
+        Log.d(TAG, "updateNoteTitle: $noteId -> $newTitle")
+
+        // Обновляем локально
+        val note = dao.getNoteById(noteId)
+        if (note != null) {
+            val updatedNote = note.copy(
+                title = newTitle,
+                updatedAt = System.currentTimeMillis()
+            )
+            dao.insert(updatedNote)
+            Log.d(TAG, "Title updated locally: $newTitle")
+        }
+
+        // Синхронизируем с сервером
+        if (!tokenManager.isGuest() && NetworkUtil.isOnline(context)) {
+            try {
+                val token = tokenManager.getToken() ?: return
+
+                api.updateNote(
+                    noteId,
+                    "Bearer $token",
+                    UpdateNoteRequest(title = newTitle)
+                )
+                Log.d(TAG, "Title synced to server: $newTitle")
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to sync title to server", e)
+                markNoteAsDirty(noteId)
+            }
+        } else {
+            markNoteAsDirty(noteId)
+        }
     }
 }

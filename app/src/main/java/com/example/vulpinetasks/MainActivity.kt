@@ -82,6 +82,9 @@ class MainActivity : AppCompatActivity() {
             },
             onInfo = { note ->
                 showNoteInfoDialog(note)
+            },
+            onRename = { note ->
+                showRenameDialog(note)
             }
         )
 
@@ -144,26 +147,57 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
+    private fun showRenameDialog(note: NoteDto) {
+        val input = EditText(this)
+        input.hint = "Введите новый заголовок"
+        input.setText(note.title)
+        input.selectAll()
+
+        AlertDialog.Builder(this)
+            .setTitle("Переименовать заметку")
+            .setMessage("Введите новое название")
+            .setView(input)
+            .setPositiveButton("Сохранить") { _, _ ->
+                val newTitle = input.text.toString().trim()
+                if (newTitle.isEmpty()) {
+                    toast("Название не может быть пустым")
+                    return@setPositiveButton
+                }
+
+                if (newTitle == note.title) {
+                    toast("Название не изменено")
+                    return@setPositiveButton
+                }
+
+                lifecycleScope.launch {
+                    try {
+                        repo.updateNoteTitle(note.id, newTitle)
+                        toast("Название изменено на: $newTitle")
+                    } catch (e: Exception) {
+                        toast("Ошибка при переименовании")
+                        e.printStackTrace()
+                    }
+                }
+            }
+            .setNegativeButton("Отмена", null)
+            .show()
+    }
+
     private fun showNoteInfoDialog(note: NoteDto) {
-        // Создаем View для диалога
         val dialogView = layoutInflater.inflate(R.layout.dialog_note_info, null)
 
-        // Находим View элементы
         val titleText = dialogView.findViewById<TextView>(R.id.info_title)
         val createdAtText = dialogView.findViewById<TextView>(R.id.info_created_at)
         val updatedAtText = dialogView.findViewById<TextView>(R.id.info_updated_at)
         val childCountText = dialogView.findViewById<TextView>(R.id.info_child_count)
         val parentCountText = dialogView.findViewById<TextView>(R.id.info_parent_count)
 
-        // Форматирование даты
         val dateFormat = SimpleDateFormat("dd.MM.yyyy HH:mm:ss", Locale.getDefault())
 
-        // Заполняем базовую информацию
         titleText.text = note.title
         createdAtText.text = dateFormat.format(Date(note.createdAt))
         updatedAtText.text = dateFormat.format(Date(note.updatedAt))
 
-        // Показываем диалог с индикатором загрузки для счетчиков
         val dialog = AlertDialog.Builder(this)
             .setTitle("Информация о заметке")
             .setView(dialogView)
@@ -172,11 +206,10 @@ class MainActivity : AppCompatActivity() {
 
         dialog.show()
 
-        // Загружаем количество вложенных и родительских заметок асинхронно
         lifecycleScope.launch {
             try {
                 val childCount = repo.getChildNotesIds(note.id).size
-                val parentCount = repo.getParentIdsForNote(note.id).size
+                val parentCount = repo.getParentIdsForNoteInfo(note.id).size
 
                 childCountText.text = childCount.toString()
                 parentCountText.text = parentCount.toString()
