@@ -31,7 +31,6 @@ class TokenManagerTest {
         `when`(mockSharedPreferences.edit()).thenReturn(mockEditor)
         `when`(mockEditor.putString(anyString(), anyString())).thenReturn(mockEditor)
         `when`(mockEditor.putBoolean(anyString(), anyBoolean())).thenReturn(mockEditor)
-        `when`(mockEditor.apply()).thenReturn(Unit)  // Unit - это пустота
 
         tokenManager = TokenManager(mockContext)
     }
@@ -41,7 +40,6 @@ class TokenManagerTest {
         val testToken = "test-token-123"
         tokenManager.saveToken(testToken)
         verify(mockEditor).putString("jwt_token", testToken)
-        verify(mockEditor).apply()
     }
 
     @Test
@@ -56,7 +54,6 @@ class TokenManagerTest {
         val testUserId = "user-123"
         tokenManager.saveUserId(testUserId)
         verify(mockEditor).putString("user_id", testUserId)
-        verify(mockEditor).apply()
     }
 
     @Test
@@ -77,7 +74,6 @@ class TokenManagerTest {
         val testEmail = "test@example.com"
         tokenManager.saveEmail(testEmail)
         verify(mockEditor).putString("user_email", testEmail)
-        verify(mockEditor).apply()
     }
 
     @Test
