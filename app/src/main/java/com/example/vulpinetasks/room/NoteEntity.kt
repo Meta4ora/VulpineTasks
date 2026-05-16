@@ -5,10 +5,15 @@ import androidx.room.PrimaryKey
 
 @Entity(tableName = "notes")
 data class NoteEntity(
-    @PrimaryKey val id: String,
+    @PrimaryKey
+    val id: String,
     val userId: String,
     val title: String,
     val type: String,
+    val content: String = "",
+    val createdAt: Long,
     val updatedAt: Long,
-    val isSynced: Boolean = false
+    val isDeleted: Boolean = false,
+    val serverId: String? = null,
+    val filePath: String? = null
 )
