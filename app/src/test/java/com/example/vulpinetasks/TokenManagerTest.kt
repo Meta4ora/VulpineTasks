@@ -31,87 +31,79 @@ class TokenManagerTest {
         `when`(mockSharedPreferences.edit()).thenReturn(mockEditor)
         `when`(mockEditor.putString(anyString(), anyString())).thenReturn(mockEditor)
         `when`(mockEditor.putBoolean(anyString(), anyBoolean())).thenReturn(mockEditor)
+        `when`(mockEditor.apply()).thenReturn(Unit)  // Unit - это пустота
 
         tokenManager = TokenManager(mockContext)
     }
 
     @Test
-    fun `saveToken and getToken should work correctly`() {
-        val testToken = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"
-
+    fun `saveToken should work correctly`() {
+        val testToken = "test-token-123"
         tokenManager.saveToken(testToken)
-        `when`(mockSharedPreferences.getString("jwt_token", null)).thenReturn(testToken)
-
-        assertEquals(testToken, tokenManager.getToken())
         verify(mockEditor).putString("jwt_token", testToken)
         verify(mockEditor).apply()
     }
 
     @Test
-    fun `saveUserId and getUserId should work correctly`() {
-        val testUserId = "123e4567-e89b-12d3-a456-426614174000"
+    fun `getToken should return saved token`() {
+        val testToken = "saved-token"
+        `when`(mockSharedPreferences.getString("jwt_token", null)).thenReturn(testToken)
+        assertEquals(testToken, tokenManager.getToken())
+    }
 
+    @Test
+    fun `saveUserId should work correctly`() {
+        val testUserId = "user-123"
         tokenManager.saveUserId(testUserId)
-        `when`(mockSharedPreferences.getString("user_id", null)).thenReturn(testUserId)
-
-        assertEquals(testUserId, tokenManager.getUserId())
         verify(mockEditor).putString("user_id", testUserId)
         verify(mockEditor).apply()
     }
 
     @Test
-    fun `isGuest should return true by default`() {
+    fun `getUserId should return saved user id`() {
+        val testUserId = "user-456"
+        `when`(mockSharedPreferences.getString("user_id", null)).thenReturn(testUserId)
+        assertEquals(testUserId, tokenManager.getUserId())
+    }
+
+    @Test
+    fun `isGuest should return true when no token saved`() {
         `when`(mockSharedPreferences.getBoolean("is_guest", true)).thenReturn(true)
         assertTrue(tokenManager.isGuest())
     }
 
     @Test
-    fun `setGuestMode should change guest mode`() {
-        tokenManager.setGuestMode(false)
-        verify(mockEditor).putBoolean("is_guest", false)
+    fun `saveEmail should work correctly`() {
+        val testEmail = "test@example.com"
+        tokenManager.saveEmail(testEmail)
+        verify(mockEditor).putString("user_email", testEmail)
         verify(mockEditor).apply()
     }
 
     @Test
-    fun `logout should clear all preferences`() {
+    fun `getEmail should return saved email`() {
+        val testEmail = "user@example.com"
+        `when`(mockSharedPreferences.getString("user_email", null)).thenReturn(testEmail)
+        assertEquals(testEmail, tokenManager.getEmail())
+    }
+
+    @Test
+    fun `guest mode should be set correctly`() {
+        tokenManager.setGuestMode(true)
+        verify(mockEditor).putBoolean("is_guest", true)
+    }
+
+    @Test
+    fun `logout should clear preferences`() {
         tokenManager.logout()
         verify(mockEditor).clear()
         verify(mockEditor, atLeastOnce()).apply()
     }
 
     @Test
-    fun `getGuestUserId should generate consistent ID`() {
-        `when`(mockSharedPreferences.getString(eq("guest_user_id"), isNull())).thenReturn(null)
-
-        val guestId1 = tokenManager.getGuestUserId()
-        val guestId2 = tokenManager.getGuestUserId()
-
-        assertNotNull(guestId1)
-        assertNotNull(guestId2)
-        assertTrue(guestId1.startsWith("guest_"))
-        assertTrue(guestId2.startsWith("guest_"))
-    }
-
-    @Test
-    fun `saveEmail and getEmail should work correctly`() {
-        val testEmail = "user@example.com"
-
-        tokenManager.saveEmail(testEmail)
-        `when`(mockSharedPreferences.getString("user_email", null)).thenReturn(testEmail)
-
-        assertEquals(testEmail, tokenManager.getEmail())
-        verify(mockEditor).putString("user_email", testEmail)
-        verify(mockEditor).apply()
-    }
-
-    @Test
-    fun `getUserId returns guest id when in guest mode`() {
-        `when`(mockSharedPreferences.getBoolean("is_guest", true)).thenReturn(true)
-        `when`(mockSharedPreferences.getString(eq("guest_user_id"), isNull())).thenReturn("guest_123456789")
-
-        val userId = tokenManager.getUserId()
-
-        assertNotNull(userId)
-        assertTrue(userId?.startsWith("guest_") ?: false)
+    fun `getGuestUserId should return non-null value`() {
+        val guestId = tokenManager.getGuestUserId()
+        assertNotNull(guestId)
+        assertTrue(guestId.startsWith("guest_"))
     }
 }

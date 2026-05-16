@@ -68,3 +68,9 @@ dependencies {
     testImplementation("androidx.arch.core:core-testing:2.2.0")
     testImplementation("org.jetbrains.kotlin:kotlin-test-junit:1.9.0")
 }
+
+tasks.withType(Test::class) {
+    testLogging {
+        events("passed", "skipped", "failed")
+    }
+}

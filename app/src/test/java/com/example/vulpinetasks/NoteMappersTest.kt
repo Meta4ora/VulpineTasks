@@ -10,18 +10,18 @@ import org.junit.Test
 class NoteMappersTest {
 
     @Test
-    fun `toDto should convert NoteEntity to NoteDto correctly`() {
+    fun `toDto should map entity to dto correctly`() {
         val entity = NoteEntity(
-            id = "note-123",
-            userId = "user-456",
+            id = "1",
+            userId = "user1",
             title = "Test Note",
             type = "note",
-            content = "Test content",
-            createdAt = 123456789L,
-            updatedAt = 123456790L,
+            content = "Content",
+            createdAt = 100L,
+            updatedAt = 200L,
             isDeleted = false,
-            serverId = "server-789",
-            filePath = "/storage/note-123.md"
+            serverId = "server1",
+            filePath = "/path"
         )
 
         val dto = entity.toDto()
@@ -30,6 +30,7 @@ class NoteMappersTest {
         assertEquals(entity.userId, dto.userId)
         assertEquals(entity.title, dto.title)
         assertEquals(entity.type, dto.type)
+        assertEquals(entity.content, dto.content)
         assertEquals(entity.createdAt, dto.createdAt)
         assertEquals(entity.updatedAt, dto.updatedAt)
         assertEquals(entity.isDeleted, dto.isDeleted)
@@ -37,17 +38,17 @@ class NoteMappersTest {
     }
 
     @Test
-    fun `toEntity should convert NoteDto to NoteEntity correctly`() {
+    fun `toEntity should map dto to entity correctly`() {
         val dto = NoteDto(
-            id = "note-123",
-            userId = "user-456",
+            id = "1",
+            userId = "user1",
             title = "Test Note",
             type = "note",
-            content = "Test content",
-            createdAt = 123456789L,
-            updatedAt = 123456790L,
+            content = "Content",
+            createdAt = 100L,
+            updatedAt = 200L,
             isDeleted = false,
-            filePath = "/storage/note-123.md"
+            filePath = "/path"
         )
 
         val entity = dto.toEntity()
@@ -65,38 +66,22 @@ class NoteMappersTest {
     }
 
     @Test
-    fun `toDto should handle empty content correctly`() {
-        val entity = NoteEntity(
-            id = "note-123",
-            userId = "user-456",
-            title = "Empty Note",
+    fun `deleted note should preserve deletion flag`() {
+        val dto = NoteDto(
+            id = "1",
+            userId = "user1",
+            title = "Deleted",
             type = "note",
             content = "",
-            createdAt = 123456789L,
-            updatedAt = 123456790L,
-            isDeleted = false
-        )
-
-        val dto = entity.toDto()
-
-        assertEquals("", dto.content)
-    }
-
-    @Test
-    fun `toEntity should handle deleted notes correctly`() {
-        val dto = NoteDto(
-            id = "note-123",
-            userId = "user-456",
-            title = "Deleted Note",
-            type = "note",
-            content = "This note is deleted",
-            createdAt = 123456789L,
-            updatedAt = 123456790L,
+            createdAt = 100L,
+            updatedAt = 100L,
             isDeleted = true
         )
 
         val entity = dto.toEntity()
-
         assertTrue(entity.isDeleted)
+
+        val backToDto = entity.toDto()
+        assertTrue(backToDto.isDeleted)
     }
 }
