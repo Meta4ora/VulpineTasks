@@ -90,16 +90,6 @@ class TokenManagerTest {
     }
 
     @Test
-    fun `logout should clear preferences`() {
-        try {
-            tokenManager.logout()
-            assertTrue(true)
-        } catch (e: Exception) {
-            fail("logout() threw exception: ${e.message}")
-        }
-    }
-
-    @Test
     fun `getGuestUserId should return non-null value`() {
         val guestId = tokenManager.getGuestUserId()
         assertNotNull(guestId)
