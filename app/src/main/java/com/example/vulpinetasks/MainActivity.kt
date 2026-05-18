@@ -3,10 +3,14 @@ package com.example.vulpinetasks
 import android.app.AlertDialog
 import android.content.Intent
 import android.os.Bundle
+import android.view.Menu
+import android.view.MenuItem
 import android.widget.EditText
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.widget.SearchView
+import androidx.appcompat.widget.Toolbar
 import androidx.core.view.GravityCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -15,6 +19,8 @@ import com.example.vulpinetasks.backend.TokenManager
 import com.example.vulpinetasks.databinding.ActivityMainBinding
 import com.example.vulpinetasks.room.AppGraph
 import com.example.vulpinetasks.util.NetworkUtil
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
@@ -27,6 +33,18 @@ class MainActivity : AppCompatActivity() {
 
     private val repo get() = AppGraph.notesRepository
     private lateinit var userId: String
+
+    // Состояния для фильтрации и поиска
+    private val searchQuery = MutableStateFlow("")
+    private val sortType = MutableStateFlow(SortType.DATE_DESC)
+    private val allNotes = mutableListOf<NoteDto>()
+
+    enum class SortType {
+        DATE_DESC,      // Сначала новые
+        DATE_ASC,       // Сначала старые
+        ALPHABETICAL_ASC,   // А-Я
+        ALPHABETICAL_DESC   // Я-А
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -41,6 +59,7 @@ class MainActivity : AppCompatActivity() {
         setupRecycler()
         observeNotes()
         setupDrawer()
+        setupSearchAndFilter()
 
         if (!tokenManager.isGuest()) {
             lifecycleScope.launch {
@@ -95,12 +114,147 @@ class MainActivity : AppCompatActivity() {
     private fun observeNotes() {
         lifecycleScope.launch {
             repo.observeNotes(userId).collect { notes ->
-                adapter.submitList(notes)
+                allNotes.clear()
+                allNotes.addAll(notes)
+                applyFiltersAndSort()
             }
         }
     }
 
+    private fun applyFiltersAndSort() {
+        lifecycleScope.launch {
+            combine(searchQuery, sortType) { query, sort ->
+                filterAndSortNotes(query, sort)
+            }.collect { filteredNotes ->
+                adapter.submitList(filteredNotes)
+                updateEmptyView(filteredNotes.isEmpty())
+            }
+        }
+    }
+
+    private fun filterAndSortNotes(query: String, sort: SortType): List<NoteDto> {
+        var filtered = allNotes.toList()
+
+        // Фильтрация по поисковому запросу
+        if (query.isNotEmpty()) {
+            filtered = filtered.filter { note ->
+                note.title.contains(query, ignoreCase = true) ||
+                        note.content.contains(query, ignoreCase = true)
+            }
+        }
+
+        // Сортировка
+        filtered = when (sort) {
+            SortType.DATE_DESC -> filtered.sortedByDescending { it.updatedAt }
+            SortType.DATE_ASC -> filtered.sortedBy { it.updatedAt }
+            SortType.ALPHABETICAL_ASC -> filtered.sortedBy { it.title.lowercase() }
+            SortType.ALPHABETICAL_DESC -> filtered.sortedByDescending { it.title.lowercase() }
+        }
+
+        return filtered
+    }
+
+    private fun setupSearchAndFilter() {
+        val toolbar = findViewById<Toolbar>(R.id.toolbar)
+        setSupportActionBar(toolbar)
+        supportActionBar?.setDisplayShowTitleEnabled(true)
+    }
+
+    override fun onCreateOptionsMenu(menu: Menu): Boolean {
+        menuInflater.inflate(R.menu.main_menu, menu)
+
+        // Настройка SearchView
+        val searchItem = menu.findItem(R.id.action_search)
+        val searchView = searchItem.actionView as SearchView
+        searchView.queryHint = "Поиск по заголовку или содержанию"
+
+        searchView.setOnQueryTextListener(object : SearchView.OnQueryTextListener {
+            override fun onQueryTextSubmit(query: String): Boolean {
+                searchQuery.value = query
+                return true
+            }
+
+            override fun onQueryTextChange(newText: String): Boolean {
+                searchQuery.value = newText
+                return true
+            }
+        })
+
+        // Обработчик кнопки "Очистить поиск"
+        searchItem.setOnActionExpandListener(object : MenuItem.OnActionExpandListener {
+            override fun onMenuItemActionExpand(item: MenuItem): Boolean = true
+
+            override fun onMenuItemActionCollapse(item: MenuItem): Boolean {
+                searchQuery.value = ""
+                return true
+            }
+        })
+
+        return true
+    }
+
+    override fun onOptionsItemSelected(item: MenuItem): Boolean {
+        return when (item.itemId) {
+            R.id.action_filter -> {
+                showFilterDialog()
+                true
+            }
+            else -> super.onOptionsItemSelected(item)
+        }
+    }
+
+    private fun showFilterDialog() {
+        val sortOptions = arrayOf(
+            "📅 Сначала новые",
+            "📅 Сначала старые",
+            "🔤 По алфавиту (А-Я)",
+            "🔤 По алфавиту (Я-А)"
+        )
+
+        val currentSelection = when (sortType.value) {
+            SortType.DATE_DESC -> 0
+            SortType.DATE_ASC -> 1
+            SortType.ALPHABETICAL_ASC -> 2
+            SortType.ALPHABETICAL_DESC -> 3
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle("Сортировка заметок")
+            .setSingleChoiceItems(sortOptions, currentSelection) { _, which ->
+                sortType.value = when (which) {
+                    0 -> SortType.DATE_DESC
+                    1 -> SortType.DATE_ASC
+                    2 -> SortType.ALPHABETICAL_ASC
+                    3 -> SortType.ALPHABETICAL_DESC
+                    else -> SortType.DATE_DESC
+                }
+            }
+            .setPositiveButton("Применить") { dialog, _ ->
+                dialog.dismiss()
+                toast("Сортировка применена")
+            }
+            .setNegativeButton("Отмена", null)
+            .show()
+    }
+
+    private fun updateEmptyView(isEmpty: Boolean) {
+        if (isEmpty) {
+            binding.emptyView.visibility = android.view.View.VISIBLE
+            binding.emptyText.text = if (searchQuery.value.isNotEmpty()) {
+                "Ничего не найдено"
+            } else {
+                "Нет заметок"
+            }
+        } else {
+            binding.emptyView.visibility = android.view.View.GONE
+        }
+    }
+
     private fun setupDrawer() {
+        binding.menuButton.setOnClickListener {
+            binding.drawerLayout.openDrawer(GravityCompat.START)
+        }
+
         binding.navView.setNavigationItemSelectedListener { item ->
             when (item.itemId) {
                 R.id.nav_login -> {
@@ -113,15 +267,8 @@ class MainActivity : AppCompatActivity() {
             binding.drawerLayout.closeDrawer(GravityCompat.START)
             true
         }
-
-        binding.menuButton.setOnClickListener {
-            binding.drawerLayout.openDrawer(GravityCompat.START)
-        }
     }
 
-    /**
-     * Диалог выбора типа создаваемой заметки
-     */
     private fun showTypeSelectionDialog() {
         val options = arrayOf("📝 Заметка", "✅ Задача")
 
@@ -137,9 +284,6 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
-    /**
-     * Диалог создания заметки/задачи с вводом заголовка
-     */
     private fun showCreateNoteDialog(type: String) {
         val input = EditText(this)
         input.hint = if (type == "note") "Введите заголовок заметки" else "Введите название задачи"
@@ -156,11 +300,10 @@ class MainActivity : AppCompatActivity() {
 
                 lifecycleScope.launch {
                     try {
-                        // Создаем заметку/задачу с соответствующим типом
                         val defaultContent = if (type == "note") {
                             "# $text\n\n"
                         } else {
-                            "[]"  // Пустой JSON массив для подзадач
+                            "[]"
                         }
 
                         repo.createNote(
@@ -170,10 +313,8 @@ class MainActivity : AppCompatActivity() {
                             isOnline = NetworkUtil.isOnline(this@MainActivity)
                         )
 
-                        // Ждем небольшую задержку для завершения операции
                         kotlinx.coroutines.delay(100)
 
-                        // Находим созданную заметку по заголовку и обновляем содержимое
                         val createdNote = getNoteByTitle(text)
                         if (createdNote != null) {
                             repo.updateNoteContent(createdNote.id, userId, defaultContent)
@@ -191,9 +332,6 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
-    /**
-     * Найти заметку по заголовку
-     */
     private suspend fun getNoteByTitle(title: String): NoteDto? {
         val notes = repo.getAllNotes(userId)
         return notes.find { it.title == title }
