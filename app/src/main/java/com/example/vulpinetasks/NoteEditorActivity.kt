@@ -2,17 +2,18 @@ package com.example.vulpinetasks
 
 import android.content.Intent
 import android.os.Bundle
-import android.text.Html
-import android.text.Spannable
-import android.text.Spanned
-import android.text.style.StyleSpan
-import android.text.style.UnderlineSpan
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import android.view.View
+import android.webkit.JavascriptInterface
+import android.webkit.WebChromeClient
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import android.widget.EditText
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.text.HtmlCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.example.vulpinetasks.backend.NoteDto
@@ -40,6 +41,9 @@ class NoteEditorActivity : AppCompatActivity() {
     private var subtasks = mutableListOf<SubTaskDto>()
     private var isSaving = false
     private var saveJob: Job? = null
+    private var currentHtml = ""
+    private var isContentLoaded = false
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     companion object {
         private const val TAG = "NOTE_EDITOR"
@@ -56,12 +60,8 @@ class NoteEditorActivity : AppCompatActivity() {
         noteTitle = intent.getStringExtra("note_title") ?: "Заметка"
         userId = tokenManager.getUserId()
 
-        Log.d(TAG, "=== onCreate ===")
-        Log.d(TAG, "noteId: $noteId")
-        Log.d(TAG, "noteTitle: $noteTitle")
-
+        setupWebView()
         loadNoteType()
-
         setupToolbar()
         loadContent()
         setupChildNotesSection()
@@ -70,12 +70,52 @@ class NoteEditorActivity : AppCompatActivity() {
         setupAddChildNoteButton()
     }
 
+    private fun setupWebView() {
+        binding.noteWebview.apply {
+            settings.javaScriptEnabled = true
+            settings.useWideViewPort = true
+            settings.loadWithOverviewMode = true
+            settings.setSupportZoom(true)
+            settings.builtInZoomControls = true
+            settings.displayZoomControls = false
+            settings.domStorageEnabled = true
+
+            // Добавляем JavaScript интерфейс для получения HTML
+            addJavascriptInterface(WebAppInterface(), "Android")
+
+            webViewClient = object : WebViewClient() {
+                override fun onPageFinished(view: WebView?, url: String?) {
+                    super.onPageFinished(view, url)
+                    // Делаем весь контент редактируемым
+                    view?.loadUrl("javascript:document.body.contentEditable = true;")
+                    // Устанавливаем фокус на тело документа
+                    view?.loadUrl("javascript:document.body.focus();")
+                    isContentLoaded = true
+                }
+            }
+
+            webChromeClient = WebChromeClient()
+
+            isFocusable = true
+            isFocusableInTouchMode = true
+            requestFocus()
+        }
+    }
+
+    inner class WebAppInterface {
+        @JavascriptInterface
+        fun setContent(html: String) {
+            mainHandler.post {
+                currentHtml = html
+                Log.d(TAG, "Content updated from WebView, length: ${html.length}")
+            }
+        }
+    }
+
     private fun loadNoteType() {
         lifecycleScope.launch {
             val note = AppGraph.notesRepository.getNoteByIdRaw(noteId ?: return@launch)
             noteType = note?.type ?: "note"
-
-            Log.d(TAG, "Note type: $noteType")
 
             if (noteType == "task") {
                 showTaskEditor()
@@ -88,57 +128,157 @@ class NoteEditorActivity : AppCompatActivity() {
     private fun showNoteEditor() {
         binding.noteEditorContainer.visibility = View.VISIBLE
         binding.taskEditorContainer.visibility = View.GONE
+        binding.formattingPanel.visibility = View.VISIBLE
         setupFormatButtons()
     }
 
     private fun showTaskEditor() {
         binding.noteEditorContainer.visibility = View.GONE
         binding.taskEditorContainer.visibility = View.VISIBLE
+        binding.formattingPanel.visibility = View.GONE
         setupSubtasksRecyclerView()
         setupAddSubtaskButton()
     }
 
     private fun setupFormatButtons() {
-        binding.btnBold.setOnClickListener { applyStyle(StyleSpan(android.graphics.Typeface.BOLD)) }
-        binding.btnItalic.setOnClickListener { applyStyle(StyleSpan(android.graphics.Typeface.ITALIC)) }
-        binding.btnUnderline.setOnClickListener { applyStyle(UnderlineSpan()) }
-        binding.btnBulletList.setOnClickListener { insertBullet() }
-        binding.btnNumberList.setOnClickListener { insertNumber() }
-        binding.btnHeading.setOnClickListener { applyHeading() }
+        binding.btnBold.setOnClickListener {
+            execJs("document.execCommand('bold', false, null);")
+            scheduleAutoSaveForNote()
+        }
+        binding.btnItalic.setOnClickListener {
+            execJs("document.execCommand('italic', false, null);")
+            scheduleAutoSaveForNote()
+        }
+        binding.btnUnderline.setOnClickListener {
+            execJs("document.execCommand('underline', false, null);")
+            scheduleAutoSaveForNote()
+        }
+        binding.btnBulletList.setOnClickListener {
+            execJs("document.execCommand('insertUnorderedList', false, null);")
+            scheduleAutoSaveForNote()
+        }
+        binding.btnNumberList.setOnClickListener {
+            execJs("document.execCommand('insertOrderedList', false, null);")
+            scheduleAutoSaveForNote()
+        }
+        binding.btnHeading.setOnClickListener {
+            execJs("document.execCommand('formatBlock', false, '<h3>');")
+            scheduleAutoSaveForNote()
+        }
+        binding.btnTable.setOnClickListener { showTableDialog() }
     }
 
-    private fun applyStyle(span: Any) {
-        val text = binding.noteContent.text
-        val start = binding.noteContent.selectionStart
-        val end = binding.noteContent.selectionEnd
+    private fun execJs(js: String) {
+        binding.noteWebview.loadUrl("javascript:$js")
+    }
 
-        if (start >= 0 && end > start && start < end) {
-            val spannable = text as Spannable
-            spannable.setSpan(span, start, end, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+    private fun scheduleAutoSaveForNote() {
+        if (noteType != "task" && isContentLoaded) {
+            saveJob?.cancel()
+            saveJob = lifecycleScope.launch {
+                delay(SAVE_DELAY_MS)
+                getCurrentHtmlFromWebView()
+            }
         }
     }
 
-    private fun insertBullet() {
-        val position = binding.noteContent.selectionStart
-        val text = binding.noteContent.text
-        text?.insert(position, "• ")
+    private fun getCurrentHtmlFromWebView() {
+        binding.noteWebview.loadUrl("javascript:Android.setContent(document.body.innerHTML);")
+        mainHandler.postDelayed({
+            if (currentHtml != originalContent && currentHtml.isNotBlank()) {
+                lifecycleScope.launch {
+                    saveContentToDatabase(currentHtml)
+                }
+            }
+        }, 200)
     }
 
-    private fun insertNumber() {
-        val position = binding.noteContent.selectionStart
-        val text = binding.noteContent.text
-        text?.insert(position, "1. ")
+    private fun insertTableHtml(rows: Int, cols: Int) {
+        val tableHtml = buildStyledTable(rows, cols)
+        val js = "javascript:(function() {" +
+                "var sel = window.getSelection();" +
+                "if (sel.rangeCount > 0) {" +
+                "var range = sel.getRangeAt(0);" +
+                "var div = document.createElement('div');" +
+                "div.innerHTML = `$tableHtml`;" +
+                "range.deleteContents();" +
+                "range.insertNode(div);" +
+                "}" +
+                "})()"
+        binding.noteWebview.loadUrl(js)
+        scheduleAutoSaveForNote()
     }
 
-    private fun applyHeading() {
-        val text = binding.noteContent.text
-        val start = binding.noteContent.selectionStart
-        val end = binding.noteContent.selectionEnd
+    private fun buildStyledTable(rows: Int, cols: Int): String {
+        val sb = StringBuilder()
+        sb.append("<div style='overflow-x: auto; margin: 8px 0;'>")
+        sb.append("<table style='border-collapse: collapse; width: 100%; font-family: sans-serif; border: 1px solid #ddd;'>")
 
-        if (start >= 0 && end > start && start < end) {
-            val spannable = text as Spannable
-            spannable.setSpan(StyleSpan(android.graphics.Typeface.BOLD), start, end, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+        sb.append("<thead>")
+        sb.append("<tr style='background-color: #2196F3;'>")
+        for (c in 0 until cols) {
+            sb.append("<th style='border: 1px solid #ddd; padding: 8px; text-align: left; color: white;'>Заголовок ${c + 1}</th>")
         }
+        sb.append("</td>")
+        sb.append("</thead>")
+
+        sb.append("<tbody>")
+        for (r in 0 until rows - 1) {
+            sb.append("<tr>")
+            for (c in 0 until cols) {
+                sb.append("<td style='border: 1px solid #ddd; padding: 8px;'>Ячейка ${c + 1}</td>")
+            }
+            sb.append("</tr>")
+        }
+        sb.append("</tbody>")
+
+        sb.append("</table>")
+        sb.append("</div>")
+        return sb.toString()
+    }
+
+    private fun showTableDialog() {
+        val builder = AlertDialog.Builder(this)
+        val view = layoutInflater.inflate(R.layout.dialog_table_config, null)
+
+        val seekBarRows = view.findViewById<android.widget.SeekBar>(R.id.seekBarRows)
+        val seekBarCols = view.findViewById<android.widget.SeekBar>(R.id.seekBarCols)
+        val tvRows = view.findViewById<android.widget.TextView>(R.id.tvRows)
+        val tvCols = view.findViewById<android.widget.TextView>(R.id.tvCols)
+
+        seekBarRows.max = 6
+        seekBarCols.max = 5
+
+        var rows = 2
+        var cols = 2
+
+        seekBarRows.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: android.widget.SeekBar?, progress: Int, fromUser: Boolean) {
+                rows = if (progress < 2) 2 else progress
+                tvRows.text = "Строк: $rows"
+                seekBar?.progress = rows
+            }
+            override fun onStartTrackingTouch(seekBar: android.widget.SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: android.widget.SeekBar?) {}
+        })
+
+        seekBarCols.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: android.widget.SeekBar?, progress: Int, fromUser: Boolean) {
+                cols = if (progress < 2) 2 else progress
+                tvCols.text = "Столбцов: $cols"
+                seekBar?.progress = cols
+            }
+            override fun onStartTrackingTouch(seekBar: android.widget.SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: android.widget.SeekBar?) {}
+        })
+
+        builder.setTitle("Вставить таблицу")
+            .setView(view)
+            .setPositiveButton("Вставить") { _, _ ->
+                insertTableHtml(rows, cols)
+            }
+            .setNegativeButton("Отмена", null)
+            .show()
     }
 
     private fun setupSubtasksRecyclerView() {
@@ -167,7 +307,7 @@ class NoteEditorActivity : AppCompatActivity() {
     }
 
     private fun showAddSubtaskDialog() {
-        val input = android.widget.EditText(this)
+        val input = EditText(this)
         input.hint = "Название подзадачи"
 
         AlertDialog.Builder(this)
@@ -202,7 +342,6 @@ class NoteEditorActivity : AppCompatActivity() {
     private fun setupChildNotesSection() {
         childNotesAdapter = ChildNotesAdapter(
             onNoteClick = { childNote ->
-                Log.d(TAG, "Child note clicked: ${childNote.title}")
                 val intent = Intent(this, NoteEditorActivity::class.java)
                 intent.putExtra("note_id", childNote.id)
                 intent.putExtra("note_title", childNote.title)
@@ -211,7 +350,6 @@ class NoteEditorActivity : AppCompatActivity() {
             onUnlinkClick = { childNote ->
                 lifecycleScope.launch {
                     if (noteId != null) {
-                        Log.d(TAG, "Unlinking child note: ${childNote.id} from parent: $noteId")
                         AppGraph.notesRepository.removeParentRelation(childNote.id, noteId!!)
                         loadChildNotes()
                         Toast.makeText(
@@ -236,24 +374,15 @@ class NoteEditorActivity : AppCompatActivity() {
     }
 
     private fun loadChildNotes() {
-        Log.d(TAG, "=== loadChildNotes ===")
         lifecycleScope.launch {
             if (noteId != null && userId != null) {
-                Log.d(TAG, "Loading child notes for parentId: $noteId")
-
                 val childNotes = AppGraph.notesRepository.getChildNotes(noteId!!, userId!!)
-                Log.d(TAG, "Child notes found: ${childNotes.size}")
-
                 childNotesAdapter?.submitList(childNotes)
-
                 binding.tagsSection.visibility = View.VISIBLE
-
-                if (childNotes.isEmpty()) {
-                    Log.d(TAG, "No child notes, showing empty section")
-                    binding.tagsTitle.text = "Вложенные заметки (0)"
+                binding.tagsTitle.text = if (childNotes.isEmpty()) {
+                    "Вложенные заметки (0)"
                 } else {
-                    Log.d(TAG, "Showing child notes section (${childNotes.size} notes)")
-                    binding.tagsTitle.text = "Вложенные заметки (${childNotes.size})"
+                    "Вложенные заметки (${childNotes.size})"
                 }
             }
         }
@@ -261,22 +390,14 @@ class NoteEditorActivity : AppCompatActivity() {
 
     private fun setupAddChildNoteButton() {
         binding.addTagButton.setOnClickListener {
-            Log.d(TAG, "Add child note button clicked")
             showAddChildNoteDialog()
         }
     }
 
     private fun showAddChildNoteDialog() {
-        Log.d(TAG, "=== showAddChildNoteDialog ===")
         lifecycleScope.launch {
-            val currentNoteId = noteId ?: run {
-                Log.e(TAG, "noteId is null")
-                return@launch
-            }
-            val currentUserId = userId ?: run {
-                Log.e(TAG, "userId is null")
-                return@launch
-            }
+            val currentNoteId = noteId ?: return@launch
+            val currentUserId = userId ?: return@launch
 
             val allNotes = AppGraph.notesRepository.getAllNotes(currentUserId)
             val existingChildIds = AppGraph.notesRepository.getChildNotesIds(currentNoteId)
@@ -301,7 +422,6 @@ class NoteEditorActivity : AppCompatActivity() {
                 .setItems(titles) { _, which ->
                     val selectedNote = availableNotes[which]
                     lifecycleScope.launch {
-                        Log.d(TAG, "Adding child note: ${selectedNote.id} to parent: $currentNoteId")
                         AppGraph.notesRepository.addParentRelation(selectedNote.id, currentNoteId)
                         loadChildNotes()
                         Toast.makeText(
@@ -317,36 +437,109 @@ class NoteEditorActivity : AppCompatActivity() {
     }
 
     private fun loadContent() {
-        Log.d(TAG, "=== loadContent ===")
         lifecycleScope.launch {
             if (noteId != null && userId != null) {
                 showLoading(true)
                 try {
                     val content = AppGraph.notesRepository.getNoteContent(noteId!!, userId!!)
                     originalContent = content
-
-                    Log.d(TAG, "Loaded content length: ${content.length}")
+                    currentHtml = content
 
                     if (noteType == "task") {
                         parseSubtasksFromJson(content)
                         subtasksAdapter?.updateList(subtasks)
-                        Log.d(TAG, "Parsed ${subtasks.size} subtasks")
                     } else {
-                        // Конвертируем HTML в Spanned для отображения форматирования
-                        val spanned = HtmlCompat.fromHtml(content, HtmlCompat.FROM_HTML_MODE_LEGACY)
-                        binding.noteContent.setText(spanned)
+                        val fullHtml = """
+                            <!DOCTYPE html>
+                            <html>
+                            <head>
+                                <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+                                <style>
+                                    * {
+                                        box-sizing: border-box;
+                                    }
+                                    body {
+                                        font-family: sans-serif;
+                                        font-size: 16px;
+                                        line-height: 1.5;
+                                        padding: 16px;
+                                        margin: 0;
+                                        background: white;
+                                        color: #212121;
+                                        min-height: 100%;
+                                    }
+                                    h1 { font-size: 28px; margin: 16px 0 8px; }
+                                    h2 { font-size: 24px; margin: 14px 0 8px; }
+                                    h3 { font-size: 20px; margin: 12px 0 8px; }
+                                    h4 { font-size: 18px; margin: 10px 0 6px; }
+                                    p { margin: 8px 0; }
+                                    ul, ol { margin: 8px 0; padding-left: 24px; }
+                                    li { margin: 4px 0; }
+                                    table {
+                                        border-collapse: collapse;
+                                        width: 100%;
+                                        margin: 12px 0;
+                                        display: table;
+                                    }
+                                    th, td {
+                                        border: 1px solid #ddd;
+                                        padding: 8px;
+                                        text-align: left;
+                                        vertical-align: top;
+                                    }
+                                    th {
+                                        background-color: #2196F3;
+                                        color: white;
+                                        font-weight: bold;
+                                    }
+                                    tr {
+                                        display: table-row;
+                                    }
+                                    thead {
+                                        display: table-header-group;
+                                    }
+                                    tbody {
+                                        display: table-row-group;
+                                    }
+                                    [contenteditable="true"]:focus {
+                                        outline: none;
+                                    }
+                                </style>
+                            </head>
+                            <body contenteditable="true">
+                                $content
+                            </body>
+                            </html>
+                        """
+                        binding.noteWebview.loadDataWithBaseURL(null, fullHtml, "text/html", "UTF-8", null)
                     }
                 } catch (e: Exception) {
                     Log.e(TAG, "Error loading content", e)
-                    Toast.makeText(this@NoteEditorActivity, "Ошибка загрузки содержимого", Toast.LENGTH_SHORT).show()
                     if (noteType == "task") {
                         subtasks.clear()
                         subtasksAdapter?.updateList(subtasks)
                     } else {
-                        binding.noteContent.setText("# $noteTitle\n\n")
+                        val defaultHtml = """
+                            <!DOCTYPE html>
+                            <html>
+                            <head>
+                                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                                <style>
+                                    body { font-family: sans-serif; padding: 16px; margin: 0; background: white; }
+                                    h1 { color: #2196F3; }
+                                </style>
+                            </head>
+                            <body contenteditable="true">
+                                <h1>$noteTitle</h1>
+                                <p></p>
+                            </body>
+                            </html>
+                        """
+                        binding.noteWebview.loadDataWithBaseURL(null, defaultHtml, "text/html", "UTF-8", null)
                     }
                 } finally {
                     showLoading(false)
+                    isContentLoaded = true
                 }
             }
         }
@@ -384,15 +577,21 @@ class NoteEditorActivity : AppCompatActivity() {
         return jsonArray.toString()
     }
 
-    /**
-     * Конвертирует форматированный текст в HTML для сохранения
-     */
-    private fun getFormattedTextAsHtml(): String {
-        val text = binding.noteContent.text
-        if (text is Spanned) {
-            return Html.toHtml(text, Html.TO_HTML_PARAGRAPH_LINES_CONSECUTIVE)
+    private suspend fun saveContentToDatabase(newContent: String) {
+        if (isSaving || newContent == originalContent) return
+
+        isSaving = true
+        try {
+            if (noteId != null && userId != null) {
+                AppGraph.notesRepository.updateNoteContent(noteId!!, userId!!, newContent)
+                originalContent = newContent
+                Log.d(TAG, "Content saved successfully")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error saving content", e)
+        } finally {
+            isSaving = false
         }
-        return text.toString()
     }
 
     private fun scheduleAutoSave() {
@@ -411,22 +610,16 @@ class NoteEditorActivity : AppCompatActivity() {
         val newContent = if (noteType == "task") {
             saveSubtasksToJson()
         } else {
-            getFormattedTextAsHtml()
+            currentHtml
         }
 
-        if (newContent == originalContent) {
-            Log.d(TAG, "Auto-save: content unchanged")
-            return
-        }
-
-        Log.d(TAG, "Auto-saving...")
+        if (newContent == originalContent) return
 
         isSaving = true
         try {
             if (noteId != null && userId != null) {
                 AppGraph.notesRepository.updateNoteContent(noteId!!, userId!!, newContent)
                 originalContent = newContent
-                Log.d(TAG, "Auto-save completed successfully")
             }
         } catch (e: Exception) {
             Log.e(TAG, "Auto-save failed", e)
@@ -437,85 +630,65 @@ class NoteEditorActivity : AppCompatActivity() {
 
     private fun setupSaveButton() {
         binding.fabSave.setOnClickListener {
-            saveContent()
-        }
-    }
-
-    private fun saveContent() {
-        val newContent = if (noteType == "task") {
-            saveSubtasksToJson()
-        } else {
-            getFormattedTextAsHtml()
-        }
-
-        Log.d(TAG, "saveContent: original length=${originalContent.length}, new length=${newContent.length}")
-
-        if (newContent == originalContent) {
-            finish()
-            return
-        }
-
-        saveJob?.cancel()
-
-        lifecycleScope.launch {
-            if (noteId != null && userId != null) {
-                showLoading(true)
-                try {
-                    Log.d(TAG, "Updating note content")
-                    AppGraph.notesRepository.updateNoteContent(noteId!!, userId!!, newContent)
-                    originalContent = newContent
-                    Toast.makeText(this@NoteEditorActivity, "Сохранено", Toast.LENGTH_SHORT).show()
-                    finish()
-                } catch (e: Exception) {
-                    Log.e(TAG, "Error saving content", e)
-                    Toast.makeText(this@NoteEditorActivity, "Ошибка сохранения", Toast.LENGTH_SHORT).show()
-                } finally {
-                    showLoading(false)
-                }
-            }
+            saveAndClose()
         }
     }
 
     private fun saveAndClose() {
         saveJob?.cancel()
-        saveContent()
+
+        if (noteType == "task") {
+            val newContent = saveSubtasksToJson()
+            if (newContent != originalContent) {
+                lifecycleScope.launch {
+                    saveContentToDatabase(newContent)
+                    finish()
+                }
+            } else {
+                finish()
+            }
+        } else {
+            // Получаем актуальное содержимое перед сохранением
+            binding.noteWebview.loadUrl("javascript:Android.setContent(document.body.innerHTML);")
+            mainHandler.postDelayed({
+                if (currentHtml != originalContent && currentHtml.isNotBlank()) {
+                    lifecycleScope.launch {
+                        saveContentToDatabase(currentHtml)
+                        finish()
+                    }
+                } else {
+                    finish()
+                }
+            }, 300)
+        }
     }
 
     private fun showLoading(show: Boolean) {
         binding.progressBar.visibility = if (show) View.VISIBLE else View.GONE
         binding.fabSave.isEnabled = !show
-
-        if (noteType == "task") {
-            binding.btnAddSubtask.isEnabled = !show
-        } else {
-            binding.noteContent.isEnabled = !show
-        }
     }
 
     override fun onPause() {
         super.onPause()
         if (noteType == "task") {
             saveJob?.cancel()
-            lifecycleScope.launch {
-                autoSaveContent()
-            }
+            lifecycleScope.launch { autoSaveContent() }
         } else {
-            // Для заметок тоже сохраняем при паузе
             saveJob?.cancel()
-            lifecycleScope.launch {
-                if (!isSaving && noteId != null && userId != null) {
-                    val newContent = getFormattedTextAsHtml()
-                    if (newContent != originalContent) {
-                        AppGraph.notesRepository.updateNoteContent(noteId!!, userId!!, newContent)
-                        originalContent = newContent
+            if (isContentLoaded) {
+                binding.noteWebview.loadUrl("javascript:Android.setContent(document.body.innerHTML);")
+                mainHandler.postDelayed({
+                    if (currentHtml != originalContent && currentHtml.isNotBlank()) {
+                        lifecycleScope.launch {
+                            saveContentToDatabase(currentHtml)
+                        }
                     }
-                }
+                }, 200)
             }
         }
     }
 
     override fun onBackPressed() {
-        super.onBackPressed()
         saveAndClose()
     }
 }
