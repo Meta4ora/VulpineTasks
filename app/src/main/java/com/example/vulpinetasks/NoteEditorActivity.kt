@@ -68,6 +68,7 @@ class NoteEditorActivity : AppCompatActivity() {
         loadChildNotes()
         setupSaveButton()
         setupAddChildNoteButton()
+        setupFormatButtons()
     }
 
     private fun setupWebView() {
@@ -80,15 +81,12 @@ class NoteEditorActivity : AppCompatActivity() {
             settings.displayZoomControls = false
             settings.domStorageEnabled = true
 
-            // Добавляем JavaScript интерфейс для получения HTML
             addJavascriptInterface(WebAppInterface(), "Android")
 
             webViewClient = object : WebViewClient() {
                 override fun onPageFinished(view: WebView?, url: String?) {
                     super.onPageFinished(view, url)
-                    // Делаем весь контент редактируемым
                     view?.loadUrl("javascript:document.body.contentEditable = true;")
-                    // Устанавливаем фокус на тело документа
                     view?.loadUrl("javascript:document.body.focus();")
                     isContentLoaded = true
                 }
@@ -128,19 +126,21 @@ class NoteEditorActivity : AppCompatActivity() {
     private fun showNoteEditor() {
         binding.noteEditorContainer.visibility = View.VISIBLE
         binding.taskEditorContainer.visibility = View.GONE
-        binding.formattingPanel.visibility = View.VISIBLE
-        setupFormatButtons()
+        binding.formattingPanelContainer.visibility = View.VISIBLE
     }
 
     private fun showTaskEditor() {
         binding.noteEditorContainer.visibility = View.GONE
         binding.taskEditorContainer.visibility = View.VISIBLE
-        binding.formattingPanel.visibility = View.GONE
+        binding.formattingPanelContainer.visibility = View.GONE
         setupSubtasksRecyclerView()
         setupAddSubtaskButton()
     }
 
     private fun setupFormatButtons() {
+        binding.btnUndo.setOnClickListener { undo() }
+        binding.btnRedo.setOnClickListener { redo() }
+
         binding.btnBold.setOnClickListener {
             execJs("document.execCommand('bold', false, null);")
             scheduleAutoSaveForNote()
@@ -166,6 +166,16 @@ class NoteEditorActivity : AppCompatActivity() {
             scheduleAutoSaveForNote()
         }
         binding.btnTable.setOnClickListener { showTableDialog() }
+    }
+
+    private fun undo() {
+        execJs("document.execCommand('undo', false, null);")
+        scheduleAutoSaveForNote()
+    }
+
+    private fun redo() {
+        execJs("document.execCommand('redo', false, null);")
+        scheduleAutoSaveForNote()
     }
 
     private fun execJs(js: String) {
@@ -455,9 +465,7 @@ class NoteEditorActivity : AppCompatActivity() {
                             <head>
                                 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
                                 <style>
-                                    * {
-                                        box-sizing: border-box;
-                                    }
+                                    * { box-sizing: border-box; }
                                     body {
                                         font-family: sans-serif;
                                         font-size: 16px;
@@ -471,7 +479,6 @@ class NoteEditorActivity : AppCompatActivity() {
                                     h1 { font-size: 28px; margin: 16px 0 8px; }
                                     h2 { font-size: 24px; margin: 14px 0 8px; }
                                     h3 { font-size: 20px; margin: 12px 0 8px; }
-                                    h4 { font-size: 18px; margin: 10px 0 6px; }
                                     p { margin: 8px 0; }
                                     ul, ol { margin: 8px 0; padding-left: 24px; }
                                     li { margin: 4px 0; }
@@ -479,27 +486,15 @@ class NoteEditorActivity : AppCompatActivity() {
                                         border-collapse: collapse;
                                         width: 100%;
                                         margin: 12px 0;
-                                        display: table;
                                     }
                                     th, td {
                                         border: 1px solid #ddd;
                                         padding: 8px;
                                         text-align: left;
-                                        vertical-align: top;
                                     }
                                     th {
                                         background-color: #2196F3;
                                         color: white;
-                                        font-weight: bold;
-                                    }
-                                    tr {
-                                        display: table-row;
-                                    }
-                                    thead {
-                                        display: table-header-group;
-                                    }
-                                    tbody {
-                                        display: table-row-group;
                                     }
                                     [contenteditable="true"]:focus {
                                         outline: none;
@@ -648,7 +643,6 @@ class NoteEditorActivity : AppCompatActivity() {
                 finish()
             }
         } else {
-            // Получаем актуальное содержимое перед сохранением
             binding.noteWebview.loadUrl("javascript:Android.setContent(document.body.innerHTML);")
             mainHandler.postDelayed({
                 if (currentHtml != originalContent && currentHtml.isNotBlank()) {

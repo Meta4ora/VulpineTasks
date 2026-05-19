@@ -18,7 +18,8 @@
         android:usesCleartextTraffic="true">
         <activity
             android:name=".NoteEditorActivity"
-            android:exported="false" />
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
         <activity
             android:name=".TrashActivity"
             android:exported="false" />
