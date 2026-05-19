@@ -1,11 +1,13 @@
 package com.example.vulpinetasks
 
 import android.content.Intent
+import android.graphics.Rect
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import android.view.View
+import android.view.ViewTreeObserver
 import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
 import android.webkit.WebView
@@ -14,6 +16,7 @@ import android.widget.EditText
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.coordinatorlayout.widget.CoordinatorLayout
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.example.vulpinetasks.backend.NoteDto
@@ -69,6 +72,7 @@ class NoteEditorActivity : AppCompatActivity() {
         setupSaveButton()
         setupAddChildNoteButton()
         setupFormatButtons()
+        setupKeyboardListener()
     }
 
     private fun setupWebView() {
@@ -98,6 +102,55 @@ class NoteEditorActivity : AppCompatActivity() {
             isFocusableInTouchMode = true
             requestFocus()
         }
+    }
+
+    private fun setupKeyboardListener() {
+        binding.root.viewTreeObserver.addOnGlobalLayoutListener(object : ViewTreeObserver.OnGlobalLayoutListener {
+            private var lastVisibleHeight = 0
+
+            override fun onGlobalLayout() {
+                val rect = Rect()
+                binding.root.getWindowVisibleDisplayFrame(rect)
+                val screenHeight = binding.root.height
+                val keypadHeight = screenHeight - rect.bottom
+
+                if (keypadHeight > screenHeight * 0.15) {
+                    // Клавиатура открыта
+                    val keyboardHeight = keypadHeight
+
+                    // Добавляем отступ снизу для клавиатуры (24dp)
+                    val adjustedKeyboardHeight = keyboardHeight + 24
+
+                    // Поднимаем FAB над клавиатурой
+                    val fabParams = binding.fabSave.layoutParams as CoordinatorLayout.LayoutParams
+                    fabParams.bottomMargin = adjustedKeyboardHeight + 180
+                    binding.fabSave.layoutParams = fabParams
+
+                    // Поднимаем панель форматирования над клавиатурой
+                    val panelParams = binding.formattingPanelContainer.layoutParams as CoordinatorLayout.LayoutParams
+                    panelParams.bottomMargin = adjustedKeyboardHeight + 8
+                    binding.formattingPanelContainer.layoutParams = panelParams
+
+                    // Добавляем отступ снизу для ScrollView
+                    binding.scrollView.setPadding(0, 0, 0, adjustedKeyboardHeight + 120)
+
+                    lastVisibleHeight = adjustedKeyboardHeight
+                } else if (lastVisibleHeight > 0) {
+                    // Клавиатура закрыта - возвращаем на место
+                    val fabParams = binding.fabSave.layoutParams as CoordinatorLayout.LayoutParams
+                    fabParams.bottomMargin = 180  // Высоко поднята по умолчанию
+                    binding.fabSave.layoutParams = fabParams
+
+                    val panelParams = binding.formattingPanelContainer.layoutParams as CoordinatorLayout.LayoutParams
+                    panelParams.bottomMargin = 24  // Отступ снизу для панели
+                    binding.formattingPanelContainer.layoutParams = panelParams
+
+                    binding.scrollView.setPadding(0, 0, 0, 0)
+
+                    lastVisibleHeight = 0
+                }
+            }
+        })
     }
 
     inner class WebAppInterface {
@@ -229,7 +282,7 @@ class NoteEditorActivity : AppCompatActivity() {
         for (c in 0 until cols) {
             sb.append("<th style='border: 1px solid #ddd; padding: 8px; text-align: left; color: white;'>Заголовок ${c + 1}</th>")
         }
-        sb.append("</td>")
+        sb.append("<tr>")
         sb.append("</thead>")
 
         sb.append("<tbody>")

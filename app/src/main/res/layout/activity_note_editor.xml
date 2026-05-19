@@ -25,17 +25,15 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:layout_marginTop="?attr/actionBarSize"
-        android:layout_marginBottom="72dp"
         android:fillViewport="true"
-        android:clipToPadding="false"
-        android:paddingBottom="16dp">
+        android:clipToPadding="false">
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
             android:padding="16dp"
-            android:paddingBottom="80dp">
+            android:paddingBottom="100dp">
 
             <!-- Секция с вложенными заметками -->
             <LinearLayout
@@ -161,23 +159,23 @@
 
     </androidx.core.widget.NestedScrollView>
 
-    <!-- Красивая округлая панель форматирования снизу -->
+    <!-- Панель форматирования с отступом снизу -->
     <androidx.cardview.widget.CardView
         android:id="@+id/formatting_panel_container"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_gravity="bottom"
-        android:layout_marginHorizontal="12dp"
-        android:layout_marginBottom="12dp"
-        app:cardCornerRadius="32dp"
-        app:cardElevation="12dp"
+        android:layout_marginHorizontal="8dp"
+        android:layout_marginBottom="24dp"
+        app:cardCornerRadius="24dp"
+        app:cardElevation="8dp"
         app:cardBackgroundColor="#FFFFFF">
 
         <HorizontalScrollView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:scrollbars="none"
-            android:padding="8dp">
+            android:padding="2dp">
 
             <LinearLayout
                 android:id="@+id/formatting_panel"
@@ -190,103 +188,103 @@
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btn_undo"
                     style="@style/Widget.Material3.Button.IconButton"
-                    android:layout_width="48dp"
-                    android:layout_height="48dp"
+                    android:layout_width="36dp"
+                    android:layout_height="36dp"
                     android:text="↩️"
-                    android:textSize="22sp"
+                    android:textSize="12sp"
                     android:background="@drawable/bg_button_rounded" />
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btn_redo"
                     style="@style/Widget.Material3.Button.IconButton"
-                    android:layout_width="48dp"
-                    android:layout_height="48dp"
+                    android:layout_width="36dp"
+                    android:layout_height="36dp"
                     android:text="↪️"
-                    android:textSize="22sp"
+                    android:textSize="12sp"
                     android:background="@drawable/bg_button_rounded" />
 
                 <View
                     android:layout_width="1dp"
-                    android:layout_height="32dp"
-                    android:layout_marginHorizontal="4dp"
+                    android:layout_height="24dp"
+                    android:layout_marginHorizontal="2dp"
                     android:background="#E0E0E0" />
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btn_bold"
                     style="@style/Widget.Material3.Button.IconButton"
-                    android:layout_width="48dp"
-                    android:layout_height="48dp"
+                    android:layout_width="36dp"
+                    android:layout_height="36dp"
                     android:text="B"
                     android:textStyle="bold"
-                    android:textSize="20sp"
+                    android:textSize="12sp"
                     android:background="@drawable/bg_button_rounded" />
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btn_italic"
                     style="@style/Widget.Material3.Button.IconButton"
-                    android:layout_width="48dp"
-                    android:layout_height="48dp"
+                    android:layout_width="36dp"
+                    android:layout_height="36dp"
                     android:text="I"
                     android:textStyle="italic"
-                    android:textSize="20sp"
+                    android:textSize="12sp"
                     android:background="@drawable/bg_button_rounded" />
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btn_underline"
                     style="@style/Widget.Material3.Button.IconButton"
-                    android:layout_width="48dp"
-                    android:layout_height="48dp"
+                    android:layout_width="36dp"
+                    android:layout_height="36dp"
                     android:text="U"
-                    android:textSize="20sp"
+                    android:textSize="12sp"
                     android:background="@drawable/bg_button_rounded" />
 
                 <View
                     android:layout_width="1dp"
-                    android:layout_height="32dp"
+                    android:layout_height="24dp"
                     android:layout_marginHorizontal="4dp"
                     android:background="#E0E0E0" />
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btn_bullet_list"
                     style="@style/Widget.Material3.Button.IconButton"
-                    android:layout_width="48dp"
-                    android:layout_height="48dp"
+                    android:layout_width="36dp"
+                    android:layout_height="36dp"
                     android:text="•"
-                    android:textSize="24sp"
+                    android:textSize="12sp"
                     android:background="@drawable/bg_button_rounded" />
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btn_number_list"
                     style="@style/Widget.Material3.Button.IconButton"
-                    android:layout_width="48dp"
-                    android:layout_height="48dp"
+                    android:layout_width="36dp"
+                    android:layout_height="36dp"
                     android:text="1."
-                    android:textSize="18sp"
+                    android:textSize="12sp"
                     android:background="@drawable/bg_button_rounded" />
 
                 <View
                     android:layout_width="1dp"
-                    android:layout_height="32dp"
+                    android:layout_height="24dp"
                     android:layout_marginHorizontal="4dp"
                     android:background="#E0E0E0" />
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btn_heading"
                     style="@style/Widget.Material3.Button.IconButton"
-                    android:layout_width="48dp"
-                    android:layout_height="48dp"
+                    android:layout_width="36dp"
+                    android:layout_height="36dp"
                     android:text="H"
                     android:textStyle="bold"
-                    android:textSize="20sp"
+                    android:textSize="12sp"
                     android:background="@drawable/bg_button_rounded" />
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btn_table"
                     style="@style/Widget.Material3.Button.IconButton"
-                    android:layout_width="48dp"
-                    android:layout_height="48dp"
+                    android:layout_width="36dp"
+                    android:layout_height="36dp"
                     android:text="⊞"
-                    android:textSize="22sp"
+                    android:textSize="12sp"
                     android:background="@drawable/bg_button_rounded" />
 
             </LinearLayout>
@@ -295,14 +293,14 @@
 
     </androidx.cardview.widget.CardView>
 
-    <!-- Плавающая кнопка сохранения -->
+    <!-- Плавающая кнопка сохранения - значительно выше -->
     <com.google.android.material.floatingactionbutton.FloatingActionButton
         android:id="@+id/fab_save"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_gravity="bottom|end"
-        android:layout_margin="16dp"
-        android:layout_marginBottom="88dp"
+        android:layout_marginBottom="85dp"
+        android:layout_marginRight="16dp"
         android:src="@android:drawable/ic_menu_save"
         app:backgroundTint="#2196F3"
         app:tint="@android:color/white" />
