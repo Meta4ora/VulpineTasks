@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string-array name="font_size_entries">
+        <item>Маленький</item>
+        <item>Средний</item>
+        <item>Большой</item>
+        <item>Очень большой</item>
+    </string-array>
+
+    <string-array name="font_size_values">
+        <item>small</item>
+        <item>medium</item>
+        <item>large</item>
+        <item>xlarge</item>
+    </string-array>
+</resources>

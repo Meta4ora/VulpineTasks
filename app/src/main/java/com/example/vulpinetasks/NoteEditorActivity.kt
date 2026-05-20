@@ -1,6 +1,9 @@
 package com.example.vulpinetasks
 
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.graphics.Rect
 import android.os.Bundle
 import android.os.Handler
@@ -18,12 +21,14 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.coordinatorlayout.widget.CoordinatorLayout
 import androidx.lifecycle.lifecycleScope
+import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.example.vulpinetasks.backend.NoteDto
 import com.example.vulpinetasks.backend.SubTaskDto
 import com.example.vulpinetasks.backend.TokenManager
 import com.example.vulpinetasks.databinding.ActivityNoteEditorBinding
 import com.example.vulpinetasks.room.AppGraph
+import com.example.vulpinetasks.utils.SettingsManager
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -47,6 +52,7 @@ class NoteEditorActivity : AppCompatActivity() {
     private var currentHtml = ""
     private var isContentLoaded = false
     private val mainHandler = Handler(Looper.getMainLooper())
+    private lateinit var lineNumbersReceiver: BroadcastReceiver
 
     companion object {
         private const val TAG = "NOTE_EDITOR"
@@ -73,6 +79,7 @@ class NoteEditorActivity : AppCompatActivity() {
         setupAddChildNoteButton()
         setupFormatButtons()
         setupKeyboardListener()
+        registerLineNumbersReceiver()
     }
 
     private fun setupWebView() {
@@ -93,6 +100,8 @@ class NoteEditorActivity : AppCompatActivity() {
                     view?.loadUrl("javascript:document.body.contentEditable = true;")
                     view?.loadUrl("javascript:document.body.focus();")
                     isContentLoaded = true
+                    // Применяем нумерацию после загрузки контента
+                    applyLineNumbers()
                 }
             }
 
@@ -115,42 +124,120 @@ class NoteEditorActivity : AppCompatActivity() {
                 val keypadHeight = screenHeight - rect.bottom
 
                 if (keypadHeight > screenHeight * 0.15) {
-                    // Клавиатура открыта
                     val keyboardHeight = keypadHeight
-
-                    // Добавляем отступ снизу для клавиатуры (24dp)
                     val adjustedKeyboardHeight = keyboardHeight + 24
 
-                    // Поднимаем FAB над клавиатурой
                     val fabParams = binding.fabSave.layoutParams as CoordinatorLayout.LayoutParams
                     fabParams.bottomMargin = adjustedKeyboardHeight + 180
                     binding.fabSave.layoutParams = fabParams
 
-                    // Поднимаем панель форматирования над клавиатурой
                     val panelParams = binding.formattingPanelContainer.layoutParams as CoordinatorLayout.LayoutParams
                     panelParams.bottomMargin = adjustedKeyboardHeight + 8
                     binding.formattingPanelContainer.layoutParams = panelParams
 
-                    // Добавляем отступ снизу для ScrollView
                     binding.scrollView.setPadding(0, 0, 0, adjustedKeyboardHeight + 120)
-
                     lastVisibleHeight = adjustedKeyboardHeight
                 } else if (lastVisibleHeight > 0) {
-                    // Клавиатура закрыта - возвращаем на место
                     val fabParams = binding.fabSave.layoutParams as CoordinatorLayout.LayoutParams
-                    fabParams.bottomMargin = 180  // Высоко поднята по умолчанию
+                    fabParams.bottomMargin = 180
                     binding.fabSave.layoutParams = fabParams
 
                     val panelParams = binding.formattingPanelContainer.layoutParams as CoordinatorLayout.LayoutParams
-                    panelParams.bottomMargin = 24  // Отступ снизу для панели
+                    panelParams.bottomMargin = 24
                     binding.formattingPanelContainer.layoutParams = panelParams
 
                     binding.scrollView.setPadding(0, 0, 0, 0)
-
                     lastVisibleHeight = 0
                 }
             }
         })
+    }
+
+    private fun registerLineNumbersReceiver() {
+        lineNumbersReceiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                if (intent?.action == "LINE_NUMBERS_CHANGED") {
+                    applyLineNumbers()
+                }
+            }
+        }
+        LocalBroadcastManager.getInstance(this).registerReceiver(lineNumbersReceiver, IntentFilter("LINE_NUMBERS_CHANGED"))
+    }
+
+    private fun unregisterLineNumbersReceiver() {
+        try {
+            LocalBroadcastManager.getInstance(this).unregisterReceiver(lineNumbersReceiver)
+        } catch (e: Exception) {
+            // Игнорируем
+        }
+    }
+
+    private fun applyLineNumbers() {
+        if (noteType != "note") return
+
+        val settingsManager = SettingsManager(this)
+        val enableLineNumbers = settingsManager.isLineNumbersEnabled()
+
+        val js = """
+            javascript:(function() {
+                var oldStyle = document.getElementById('line-numbers-style');
+                if (oldStyle) oldStyle.remove();
+                
+                if ($enableLineNumbers) {
+                    var style = document.createElement('style');
+                    style.id = 'line-numbers-style';
+                    style.innerHTML = `
+                        body {
+                            counter-reset: line;
+                            padding-left: 0 !important;
+                        }
+                        .line-numbered {
+                            display: block;
+                            counter-increment: line;
+                            position: relative;
+                            padding-left: 50px;
+                            margin: 0;
+                            min-height: 1.5em;
+                            white-space: pre-wrap;
+                            word-wrap: break-word;
+                        }
+                        .line-numbered:before {
+                            content: counter(line);
+                            position: absolute;
+                            left: 0;
+                            width: 35px;
+                            text-align: right;
+                            color: #999;
+                            font-size: 0.85em;
+                            padding-right: 10px;
+                            border-right: 1px solid #ddd;
+                            user-select: none;
+                        }
+                    `;
+                    document.head.appendChild(style);
+                    
+                    var body = document.body;
+                    var html = body.innerHTML;
+                    var lines = html.split('<br>');
+                    var newHtml = '';
+                    for (var i = 0; i < lines.length; i++) {
+                        var lineContent = lines[i];
+                        if (lineContent.trim() === '') {
+                            lineContent = '<br>';
+                        }
+                        newHtml += '<div class="line-numbered">' + lineContent + '</div>';
+                    }
+                    body.innerHTML = newHtml;
+                } else {
+                    var body = document.body;
+                    var html = body.innerHTML;
+                    var newHtml = html.replace(/<div class="line-numbered">(.*?)<\/div>/g, '$1');
+                    body.innerHTML = newHtml;
+                }
+            })()
+        """.trimIndent()
+
+        binding.noteWebview.loadUrl(js)
     }
 
     inner class WebAppInterface {
@@ -733,6 +820,11 @@ class NoteEditorActivity : AppCompatActivity() {
                 }, 200)
             }
         }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        unregisterLineNumbersReceiver()
     }
 
     override fun onBackPressed() {

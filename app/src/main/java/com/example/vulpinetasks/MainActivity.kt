@@ -263,6 +263,9 @@ class MainActivity : AppCompatActivity() {
                 R.id.nav_trash -> {
                     startActivity(Intent(this, TrashActivity::class.java))
                 }
+                R.id.nav_settings -> {
+                    startActivity(Intent(this, SettingsActivity::class.java))
+                }
             }
             binding.drawerLayout.closeDrawer(GravityCompat.START)
             true
