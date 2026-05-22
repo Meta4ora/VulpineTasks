@@ -60,9 +60,6 @@ class SettingsActivity : AppCompatActivity() {
         }
 
         private fun updateSummaries() {
-            val fontSizePref = findPreference<ListPreference>(SettingsManager.KEY_FONT_SIZE)
-            fontSizePref?.summary = fontSizePref?.entry
-
             val defaultTitlePref = findPreference<EditTextPreference>(SettingsManager.KEY_DEFAULT_NOTE_TITLE)
             defaultTitlePref?.summary = settingsManager.getDefaultNoteTitle()
         }
@@ -75,16 +72,6 @@ class SettingsActivity : AppCompatActivity() {
                 val isDark = newValue as Boolean
                 settingsManager.setDarkMode(isDark)
                 requireActivity().recreate()
-                true
-            }
-
-            // Размер шрифта
-            val fontSizePref = findPreference<ListPreference>(SettingsManager.KEY_FONT_SIZE)
-            fontSizePref?.setValue(settingsManager.getFontSize())
-            fontSizePref?.setOnPreferenceChangeListener { _, newValue ->
-                settingsManager.setFontSize(newValue as String)
-                fontSizePref?.summary = fontSizePref?.entry
-                requireContext().sendBroadcast(Intent("FONT_SIZE_CHANGED"))
                 true
             }
 
@@ -128,13 +115,6 @@ class SettingsActivity : AppCompatActivity() {
                 val newTitle = newValue as String
                 settingsManager.setDefaultNoteTitle(newTitle)
                 defaultTitlePref?.summary = newTitle
-                true
-            }
-
-            // Синхронизация сейчас
-            val syncNowPref = findPreference<Preference>("sync_now")
-            syncNowPref?.setOnPreferenceClickListener {
-                performManualSync()
                 true
             }
 
