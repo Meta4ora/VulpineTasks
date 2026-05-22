@@ -91,17 +91,72 @@ class NoteEditorActivity : AppCompatActivity() {
             settings.builtInZoomControls = true
             settings.displayZoomControls = false
             settings.domStorageEnabled = true
+            settings.setSupportMultipleWindows(false)
 
             addJavascriptInterface(WebAppInterface(), "Android")
 
             webViewClient = object : WebViewClient() {
                 override fun onPageFinished(view: WebView?, url: String?) {
                     super.onPageFinished(view, url)
+
+                    // Включаем редактирование
                     view?.loadUrl("javascript:document.body.contentEditable = true;")
                     view?.loadUrl("javascript:document.body.focus();")
+
                     isContentLoaded = true
-                    // Применяем нумерацию после загрузки контента
                     applyLineNumbers()
+
+                    // Улучшаем видимость курсора и добавляем автопрокрутку
+                    val cursorJs = """
+                        javascript:(function() {
+                            // Прокрутка к позиции курсора
+                            function scrollToCursor() {
+                                var selection = window.getSelection();
+                                if (selection.rangeCount > 0) {
+                                    var range = selection.getRangeAt(0);
+                                    var rect = range.getBoundingClientRect();
+                                    if (rect) {
+                                        var targetScroll = rect.top + window.scrollY - 100;
+                                        window.scrollTo({ top: targetScroll, behavior: 'smooth' });
+                                    }
+                                }
+                            }
+                            
+                            // Отслеживаем изменения позиции курсора
+                            document.addEventListener('selectionchange', function() {
+                                scrollToCursor();
+                            });
+                            
+                            // Отслеживаем ввод текста
+                            document.addEventListener('input', function() {
+                                setTimeout(scrollToCursor, 10);
+                            });
+                            
+                            // Отслеживаем нажатия клавиш
+                            document.addEventListener('keyup', function(e) {
+                                setTimeout(scrollToCursor, 10);
+                            });
+                            
+                            // Отслеживаем касания на мобильных устройствах
+                            document.addEventListener('touchend', function() {
+                                setTimeout(scrollToCursor, 100);
+                            });
+                            
+                            // Улучшаем видимость курсора
+                            var style = document.createElement('style');
+                            style.innerHTML = `
+                                [contenteditable="true"] {
+                                    caret-color: #2196F3 !important;
+                                }
+                                [contenteditable="true"]:focus {
+                                    outline: none;
+                                }
+                            `;
+                            document.head.appendChild(style);
+                        })()
+                    """.trimIndent()
+
+                    view?.loadUrl(cursorJs)
                 }
             }
 
@@ -114,40 +169,42 @@ class NoteEditorActivity : AppCompatActivity() {
     }
 
     private fun setupKeyboardListener() {
-        binding.root.viewTreeObserver.addOnGlobalLayoutListener(object : ViewTreeObserver.OnGlobalLayoutListener {
-            private var lastVisibleHeight = 0
+        // Сохраняем исходные позиции
+        var originalFabBottomMargin = 200
+        var originalPanelBottomMargin = 8
 
+        binding.root.viewTreeObserver.addOnGlobalLayoutListener(object : ViewTreeObserver.OnGlobalLayoutListener {
             override fun onGlobalLayout() {
                 val rect = Rect()
                 binding.root.getWindowVisibleDisplayFrame(rect)
                 val screenHeight = binding.root.height
                 val keypadHeight = screenHeight - rect.bottom
 
+                // Фиксированная высота, на которую поднимаются элементы (80dp)
+                val fixedRaiseHeight = 80
+
                 if (keypadHeight > screenHeight * 0.15) {
-                    val keyboardHeight = keypadHeight
-                    val adjustedKeyboardHeight = keyboardHeight + 24
-
+                    // Клавиатура открыта - поднимаем элементы на фиксированную высоту
                     val fabParams = binding.fabSave.layoutParams as CoordinatorLayout.LayoutParams
-                    fabParams.bottomMargin = adjustedKeyboardHeight + 180
+                    fabParams.bottomMargin = originalFabBottomMargin + fixedRaiseHeight + 24
                     binding.fabSave.layoutParams = fabParams
 
                     val panelParams = binding.formattingPanelContainer.layoutParams as CoordinatorLayout.LayoutParams
-                    panelParams.bottomMargin = adjustedKeyboardHeight + 8
+                    panelParams.bottomMargin = originalPanelBottomMargin + fixedRaiseHeight
                     binding.formattingPanelContainer.layoutParams = panelParams
 
-                    binding.scrollView.setPadding(0, 0, 0, adjustedKeyboardHeight + 120)
-                    lastVisibleHeight = adjustedKeyboardHeight
-                } else if (lastVisibleHeight > 0) {
+                    binding.scrollView.setPadding(0, 0, 0, fixedRaiseHeight + 120)
+                } else {
+                    // Клавиатура закрыта - возвращаем на исходные позиции
                     val fabParams = binding.fabSave.layoutParams as CoordinatorLayout.LayoutParams
-                    fabParams.bottomMargin = 180
+                    fabParams.bottomMargin = originalFabBottomMargin
                     binding.fabSave.layoutParams = fabParams
 
                     val panelParams = binding.formattingPanelContainer.layoutParams as CoordinatorLayout.LayoutParams
-                    panelParams.bottomMargin = 24
+                    panelParams.bottomMargin = originalPanelBottomMargin
                     binding.formattingPanelContainer.layoutParams = panelParams
 
-                    binding.scrollView.setPadding(0, 0, 0, 0)
-                    lastVisibleHeight = 0
+                    binding.scrollView.setPadding(0, 0, 0, 60)
                 }
             }
         })
@@ -248,6 +305,29 @@ class NoteEditorActivity : AppCompatActivity() {
                 Log.d(TAG, "Content updated from WebView, length: ${html.length}")
             }
         }
+
+        @JavascriptInterface
+        fun showToast(message: String) {
+            mainHandler.post {
+                Toast.makeText(this@NoteEditorActivity, message, Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        @JavascriptInterface
+        fun showTableOptions(tableHtml: String) {
+            mainHandler.post {
+                val options = arrayOf("Удалить таблицу", "Очистить содержимое", "Отмена")
+                AlertDialog.Builder(this@NoteEditorActivity)
+                    .setTitle("Действия с таблицей")
+                    .setItems(options) { _, which ->
+                        when (which) {
+                            0 -> deleteCurrentTable()
+                            1 -> clearTableContent()
+                        }
+                    }
+                    .show()
+            }
+        }
     }
 
     private fun loadNoteType() {
@@ -306,6 +386,176 @@ class NoteEditorActivity : AppCompatActivity() {
             scheduleAutoSaveForNote()
         }
         binding.btnTable.setOnClickListener { showTableDialog() }
+
+        // Добавляем обработчик для кнопки удаления таблицы
+        binding.btnDeleteTable.setOnClickListener { showTableOptionsDialog() }
+    }
+
+    private fun showTableOptionsDialog() {
+        val js = """
+            javascript:(function() {
+                var selection = window.getSelection();
+                if (selection.rangeCount > 0) {
+                    var range = selection.getRangeAt(0);
+                    var node = range.startContainer;
+                    
+                    var table = null;
+                    while (node != null && node != document.body) {
+                        if (node.nodeType === 1) {
+                            if (node.tagName === 'TABLE') {
+                                table = node;
+                                break;
+                            }
+                            if (node.tagName === 'TD' || node.tagName === 'TH') {
+                                table = node.closest('table');
+                                break;
+                            }
+                        }
+                        node = node.parentNode;
+                    }
+                    
+                    if (table) {
+                        Android.showTableOptions(table.outerHTML);
+                    } else {
+                        Android.showToast("Пожалуйста, установите курсор внутрь таблицы");
+                    }
+                } else {
+                    Android.showToast("Пожалуйста, установите курсор внутрь таблицы");
+                }
+            })();
+        """.trimIndent()
+
+        execJs(js)
+    }
+
+    private fun deleteCurrentTable() {
+        val js = """
+            (function() {
+                try {
+                    var selection = window.getSelection();
+                    if (!selection || selection.rangeCount === 0) {
+                        Android.showToast("Установите курсор внутрь таблицы");
+                        return;
+                    }
+
+                    var range = selection.getRangeAt(0);
+                    var node = range.startContainer;
+                    
+                    // Если курсор внутри текстового узла
+                    if (node.nodeType === 3) {
+                        node = node.parentNode;
+                    }
+                    
+                    var table = null;
+                    
+                    // Поиск TABLE вверх по DOM
+                    while (node && node !== document.body) {
+                        if (node.nodeType === 1 && node.tagName && node.tagName.toUpperCase() === 'TABLE') {
+                            table = node;
+                            break;
+                        }
+                        node = node.parentNode;
+                    }
+                    
+                    if (!table) {
+                        Android.showToast("Таблица не найдена");
+                        return;
+                    }
+                    
+                    var parent = table.parentNode;
+                    if (!parent) {
+                        Android.showToast("Ошибка DOM");
+                        return;
+                    }
+                    
+                    // Создаем новый параграф
+                    var paragraph = document.createElement('p');
+                    paragraph.innerHTML = '<br>';
+                    
+                    // Вставляем параграф на место таблицы
+                    parent.insertBefore(paragraph, table);
+                    
+                    // Удаляем таблицу
+                    table.remove();
+                    
+                    // Устанавливаем курсор в новый параграф
+                    var newRange = document.createRange();
+                    newRange.setStart(paragraph, 0);
+                    newRange.collapse(true);
+                    selection.removeAllRanges();
+                    selection.addRange(newRange);
+                    
+                    // Триггерим событие input для автосохранения
+                    document.body.dispatchEvent(new Event('input', { bubbles: true }));
+                    Android.showToast("Таблица удалена");
+                    
+                } catch(e) {
+                    Android.showToast("Ошибка: " + e.message);
+                }
+            })();
+        """.trimIndent()
+
+        execJs(js)
+        scheduleAutoSaveForNote()
+    }
+
+    private fun clearTableContent() {
+        val js = """
+            (function() {
+                try {
+                    var selection = window.getSelection();
+                    if (!selection || selection.rangeCount === 0) {
+                        Android.showToast("Установите курсор внутрь таблицы");
+                        return;
+                    }
+
+                    var range = selection.getRangeAt(0);
+                    var node = range.startContainer;
+                    
+                    // Если курсор внутри текстового узла
+                    if (node.nodeType === 3) {
+                        node = node.parentNode;
+                    }
+                    
+                    var table = null;
+                    
+                    // Поиск TABLE вверх по DOM
+                    while (node && node !== document.body) {
+                        if (node.nodeType === 1 && node.tagName && node.tagName.toUpperCase() === 'TABLE') {
+                            table = node;
+                            break;
+                        }
+                        node = node.parentNode;
+                    }
+                    
+                    if (!table) {
+                        Android.showToast("Таблица не найдена");
+                        return;
+                    }
+                    
+                    // Очищаем содержимое ячеек
+                    var cells = table.querySelectorAll('td');
+                    for (var i = 0; i < cells.length; i++) {
+                        cells[i].innerHTML = '';
+                    }
+                    
+                    // Восстанавливаем заголовки
+                    var headers = table.querySelectorAll('th');
+                    for (var i = 0; i < headers.length; i++) {
+                        headers[i].innerHTML = 'Заголовок ' + (i + 1);
+                    }
+                    
+                    document.body.dispatchEvent(new Event('input', { bubbles: true }));
+                    Android.showToast("Содержимое таблицы очищено");
+                    
+                } catch(e) {
+                    Android.showToast("Ошибка: " + e.message);
+                }
+            })();
+        """.trimIndent()
+
+        execJs(js)
+        scheduleAutoSaveForNote()
     }
 
     private fun undo() {
@@ -319,7 +569,7 @@ class NoteEditorActivity : AppCompatActivity() {
     }
 
     private fun execJs(js: String) {
-        binding.noteWebview.loadUrl("javascript:$js")
+        binding.noteWebview.evaluateJavascript(js, null)
     }
 
     private fun scheduleAutoSaveForNote() {
@@ -345,7 +595,7 @@ class NoteEditorActivity : AppCompatActivity() {
 
     private fun insertTableHtml(rows: Int, cols: Int) {
         val tableHtml = buildStyledTable(rows, cols)
-        val js = "javascript:(function() {" +
+        val js = "(function() {" +
                 "var sel = window.getSelection();" +
                 "if (sel.rangeCount > 0) {" +
                 "var range = sel.getRangeAt(0);" +
@@ -355,7 +605,7 @@ class NoteEditorActivity : AppCompatActivity() {
                 "range.insertNode(div);" +
                 "}" +
                 "})()"
-        binding.noteWebview.loadUrl(js)
+        execJs(js)
         scheduleAutoSaveForNote()
     }
 
@@ -369,14 +619,14 @@ class NoteEditorActivity : AppCompatActivity() {
         for (c in 0 until cols) {
             sb.append("<th style='border: 1px solid #ddd; padding: 8px; text-align: left; color: white;'>Заголовок ${c + 1}</th>")
         }
-        sb.append("<tr>")
+        sb.append("</tr>")
         sb.append("</thead>")
 
         sb.append("<tbody>")
         for (r in 0 until rows - 1) {
             sb.append("<tr>")
             for (c in 0 until cols) {
-                sb.append("<td style='border: 1px solid #ddd; padding: 8px;'>Ячейка ${c + 1}</td>")
+                sb.append("<td style='border: 1px solid #ddd; padding: 8px;'>Ячейка ${c + 1}浏览")
             }
             sb.append("</tr>")
         }
@@ -528,7 +778,7 @@ class NoteEditorActivity : AppCompatActivity() {
             if (noteId != null && userId != null) {
                 val childNotes = AppGraph.notesRepository.getChildNotes(noteId!!, userId!!)
                 childNotesAdapter?.submitList(childNotes)
-                binding.tagsSection.visibility = View.VISIBLE
+                binding.tagsSectionCard.visibility = View.VISIBLE
                 binding.tagsTitle.text = if (childNotes.isEmpty()) {
                     "Вложенные заметки (0)"
                 } else {
