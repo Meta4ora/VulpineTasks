@@ -4,7 +4,7 @@
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:layout_marginBottom="8dp"
-    app:cardCornerRadius="8dp"
+    app:cardCornerRadius="24dp"
     app:cardElevation="1dp">
 
     <LinearLayout
@@ -25,7 +25,7 @@
             android:id="@+id/btn_delete_subtask"
             android:layout_width="32dp"
             android:layout_height="32dp"
-            android:src="@android:drawable/ic_menu_delete"
+            android:src="@drawable/ic_delete"
             android:background="?attr/selectableItemBackgroundBorderless" />
 
     </LinearLayout>
