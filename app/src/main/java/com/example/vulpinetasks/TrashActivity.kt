@@ -22,6 +22,7 @@ class TrashActivity : AppCompatActivity() {
     private val repo get() = AppGraph.notesRepository
     private lateinit var userId: String
     private lateinit var tokenManager: TokenManager
+    private var trashNotes = listOf<NoteDto>()
 
     companion object {
         private const val TAG = "VULPINE_TRASH"
@@ -38,8 +39,20 @@ class TrashActivity : AppCompatActivity() {
 
         Log.d(TAG, "TrashActivity created userId=$userId")
 
+        setupToolbar()
         setupRecycler()
         observeTrash()
+        setupClearAllButton()
+    }
+
+    private fun setupToolbar() {
+        setSupportActionBar(binding.toolbar)
+        supportActionBar?.setDisplayHomeAsUpEnabled(true)
+        supportActionBar?.setDisplayShowTitleEnabled(false)
+
+        binding.toolbar.setNavigationOnClickListener {
+            onBackPressed()
+        }
     }
 
     private fun setupRecycler() {
@@ -48,13 +61,21 @@ class TrashActivity : AppCompatActivity() {
             onRestore = { note ->
                 Log.d(TAG, "RESTORE CLICK id=${note.id}")
                 lifecycleScope.launch {
-                    repo.restoreFromTrash(note.id)
-                    toast("Заметка восстановлена")
+                    showLoading(true)
+                    try {
+                        repo.restoreFromTrash(note.id)
+                        toast("Заметка восстановлена")
+                    } catch (e: Exception) {
+                        toast("Ошибка при восстановлении")
+                        e.printStackTrace()
+                    } finally {
+                        showLoading(false)
+                    }
                 }
             },
             onDelete = { note ->
                 Log.d(TAG, "DELETE CLICK id=${note.id}")
-                showDeleteDialog(note)
+                showDeleteSingleDialog(note)
             }
         )
 
@@ -67,27 +88,98 @@ class TrashActivity : AppCompatActivity() {
         lifecycleScope.launch {
             repo.observeTrash(userId).collect { list ->
                 Log.d(TAG, "UI TRASH UPDATE size=${list.size}")
-                list.forEach { note ->
-                    Log.d(TAG, "TRASH ITEM id=${note.id} title=${note.title}")
-                }
+                trashNotes = list
                 adapter.update(list)
-                binding.emptyText.visibility = if (list.isEmpty()) View.VISIBLE else View.GONE
+                updateEmptyView(list.isEmpty())
+                updateClearAllButtonVisibility(list.isNotEmpty())
             }
         }
     }
 
-    private fun showDeleteDialog(note: NoteDto) {
+    private fun updateEmptyView(isEmpty: Boolean) {
+        binding.emptyText.visibility = if (isEmpty) View.VISIBLE else View.GONE
+        binding.recycler.visibility = if (isEmpty) View.GONE else View.VISIBLE
+    }
+
+    private fun updateClearAllButtonVisibility(hasItems: Boolean) {
+        binding.clearAllButton.visibility = if (hasItems) View.VISIBLE else View.GONE
+    }
+
+    private fun setupClearAllButton() {
+        binding.clearAllButton.setOnClickListener {
+            if (trashNotes.isNotEmpty()) {
+                showClearAllDialog()
+            }
+        }
+    }
+
+    private fun showClearAllDialog() {
+        AlertDialog.Builder(this)
+            .setTitle("Очистить корзину")
+            .setMessage("Вы уверены, что хотите навсегда удалить все заметки из корзины?")
+            .setPositiveButton("Очистить всё") { _, _ ->
+                clearAllTrash()
+            }
+            .setNegativeButton("Отмена", null)
+            .show()
+    }
+
+    private fun clearAllTrash() {
+        lifecycleScope.launch {
+            showLoading(true)
+            try {
+                var deletedCount = 0
+                for (note in trashNotes) {
+                    try {
+                        repo.deletePermanently(note.id)
+                        deletedCount++
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to delete note: ${note.id}", e)
+                    }
+                }
+                toast("Удалено $deletedCount заметок")
+
+                if (deletedCount > 0) {
+                    // Принудительно обновляем список
+                    val updatedList = trashNotes.filter { it.id !in trashNotes.map { note -> note.id } }
+                    adapter.update(updatedList)
+                    updateEmptyView(updatedList.isEmpty())
+                }
+            } catch (e: Exception) {
+                toast("Ошибка при очистке корзины")
+                e.printStackTrace()
+            } finally {
+                showLoading(false)
+            }
+        }
+    }
+
+    private fun showDeleteSingleDialog(note: NoteDto) {
         AlertDialog.Builder(this)
             .setTitle("Удалить заметку?")
-            .setMessage("Заметка будет удалена навсегда")
+            .setMessage("Заметка \"${note.title}\" будет удалена навсегда")
             .setPositiveButton("Удалить") { _, _ ->
                 lifecycleScope.launch {
-                    repo.deletePermanently(note.id)
-                    toast("Заметка удалена")
+                    showLoading(true)
+                    try {
+                        repo.deletePermanently(note.id)
+                        toast("Заметка удалена")
+                    } catch (e: Exception) {
+                        toast("Ошибка при удалении")
+                        e.printStackTrace()
+                    } finally {
+                        showLoading(false)
+                    }
                 }
             }
             .setNegativeButton("Отмена", null)
             .show()
+    }
+
+    private fun showLoading(show: Boolean) {
+        binding.progressBar.visibility = if (show) View.VISIBLE else View.GONE
+        binding.clearAllButton.isEnabled = !show
+        binding.recycler.isEnabled = !show
     }
 
     private fun toast(msg: String) {
