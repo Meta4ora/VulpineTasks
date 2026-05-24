@@ -1,10 +1,12 @@
 package com.example.vulpinetasks
 
+import android.animation.ObjectAnimator
 import android.app.AlertDialog
 import android.content.Intent
 import android.os.Bundle
 import android.view.Menu
 import android.view.MenuItem
+import android.view.animation.LinearInterpolator
 import android.widget.EditText
 import android.widget.TextView
 import android.widget.Toast
@@ -30,6 +32,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
     private lateinit var adapter: NotesAdapter
     private lateinit var tokenManager: TokenManager
+    private var syncAnimator: ObjectAnimator? = null
+    private var isSyncing = false
 
     private val repo get() = AppGraph.notesRepository
     private lateinit var userId: String
@@ -60,29 +64,188 @@ class MainActivity : AppCompatActivity() {
         observeNotes()
         setupDrawer()
         setupSearchAndFilter()
+        setupSyncButton()
+        updateNavHeader()
 
         if (!tokenManager.isGuest()) {
             lifecycleScope.launch {
                 repo.clearDeletedRelations()
-                repo.fetchFromServer(userId)
+                performInitialSync()
             }
+        } else {
+            updateSyncIndicator(true)
         }
 
         binding.addNoteButton.setOnClickListener {
             showTypeSelectionDialog()
         }
+    }
 
-        binding.syncButton.setOnClickListener {
+    override fun onResume() {
+        super.onResume()
+        updateNavHeader()
+        if (!tokenManager.isGuest()) {
             lifecycleScope.launch {
-                if (tokenManager.isGuest()) {
-                    toast("Синхронизация недоступна в гостевом режиме")
-                } else {
-                    repo.syncUnsyncedNotes(userId)
-                    repo.fetchFromServer(userId)
-                    toast("Синхронизация завершена")
-                }
+                checkUnsyncedNotes()
             }
         }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        syncAnimator?.cancel()
+    }
+
+    private fun setupSyncButton() {
+        binding.syncButton.setOnClickListener {
+            performSync()
+        }
+    }
+
+    private suspend fun performInitialSync() {
+        try {
+            startSyncAnimation()
+            isSyncing = true
+
+            repo.fetchFromServer(userId)
+            repo.syncUnsyncedNotes(userId)
+
+            checkUnsyncedNotes()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        } finally {
+            isSyncing = false
+            stopSyncAnimation()
+        }
+    }
+
+    private fun performSync() {
+        if (tokenManager.isGuest()) {
+            showGuestSyncDialog()
+            return
+        }
+
+        if (!NetworkUtil.isOnline(this)) {
+            showNoInternetDialog()
+            return
+        }
+
+        if (isSyncing) {
+            Toast.makeText(this, "Синхронизация уже выполняется...", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        lifecycleScope.launch {
+            try {
+                startSyncAnimation()
+                isSyncing = true
+
+                Toast.makeText(this@MainActivity, "Синхронизация началась...", Toast.LENGTH_SHORT).show()
+
+                // Сначала отправляем несинхронизированные заметки на сервер
+                repo.syncUnsyncedNotes(userId)
+
+                // Затем загружаем обновления с сервера
+                repo.fetchFromServer(userId)
+
+                // Синхронизируем локальные изменения
+                repo.syncLocalChangesToServer(userId)
+
+                // Проверяем остались ли несинхронизированные заметки
+                checkUnsyncedNotes()
+
+                Toast.makeText(this@MainActivity, "Синхронизация завершена успешно", Toast.LENGTH_SHORT).show()
+            } catch (e: Exception) {
+                Toast.makeText(this@MainActivity, "Ошибка синхронизации: ${e.message}", Toast.LENGTH_SHORT).show()
+                updateSyncIndicator(false)
+            } finally {
+                isSyncing = false
+                stopSyncAnimation()
+            }
+        }
+    }
+
+    private fun startSyncAnimation() {
+        syncAnimator = ObjectAnimator.ofFloat(binding.syncButton, "rotation", 0f, 360f).apply {
+            duration = 1000
+            repeatCount = ObjectAnimator.INFINITE
+            interpolator = LinearInterpolator()
+            start()
+        }
+    }
+
+    private fun stopSyncAnimation() {
+        syncAnimator?.cancel()
+        binding.syncButton.rotation = 0f
+    }
+
+    private suspend fun checkUnsyncedNotes() {
+        if (tokenManager.isGuest()) {
+            updateSyncIndicator(true)
+            return
+        }
+
+        try {
+            // Проверяем наличие несинхронизированных заметок через репозиторий
+            val hasUnsynced = repo.hasUnsyncedNotes(userId)
+            updateSyncIndicator(!hasUnsynced)
+        } catch (e: Exception) {
+            updateSyncIndicator(true)
+        }
+    }
+
+    private fun updateSyncIndicator(isSynced: Boolean) {
+        val indicator = binding.syncIndicator
+        if (isSynced) {
+            indicator.visibility = android.view.View.GONE
+        } else {
+            indicator.visibility = android.view.View.VISIBLE
+            indicator.setBackgroundResource(R.drawable.sync_indicator_red)
+        }
+    }
+
+    private fun updateNavHeader() {
+        try {
+            val headerView = binding.navView.getHeaderView(0)
+            val userEmailView = headerView.findViewById<TextView>(R.id.nav_user_email)
+
+            if (tokenManager.getToken() != null) {
+                userEmailView.text = tokenManager.getEmail() ?: "user@example.com"
+                userEmailView.visibility = android.view.View.VISIBLE
+
+                val creationDate = tokenManager.getAccountCreationDate()
+            } else if (tokenManager.isGuest()) {
+                userEmailView.text = "Гостевой режим"
+                userEmailView.visibility = android.view.View.VISIBLE
+            } else {
+                userEmailView.text = "Не авторизован"
+                userEmailView.visibility = android.view.View.VISIBLE
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    private fun showGuestSyncDialog() {
+        AlertDialog.Builder(this)
+            .setTitle("Синхронизация недоступна")
+            .setMessage("Синхронизация доступна только для зарегистрированных пользователей. Хотите войти или зарегистрироваться?")
+            .setPositiveButton("Войти") { _, _ ->
+                startActivity(Intent(this, LoginActivity::class.java))
+            }
+            .setNegativeButton("Отмена", null)
+            .show()
+    }
+
+    private fun showNoInternetDialog() {
+        AlertDialog.Builder(this)
+            .setTitle("Нет подключения к интернету")
+            .setMessage("Для синхронизации требуется подключение к интернету. Проверьте соединение и попробуйте снова.")
+            .setPositiveButton("Попробовать снова") { _, _ ->
+                performSync()
+            }
+            .setNegativeButton("Отмена", null)
+            .show()
     }
 
     private fun setupRecycler() {
@@ -97,6 +260,7 @@ class MainActivity : AppCompatActivity() {
                 lifecycleScope.launch {
                     repo.moveToTrash(note.id)
                     toast("Перемещено в корзину")
+                    checkUnsyncedNotes()
                 }
             },
             onInfo = { note ->
@@ -325,6 +489,10 @@ class MainActivity : AppCompatActivity() {
                         } else {
                             toast(if (type == "note") "Заметка создана" else "Задача создана")
                         }
+
+                        if (!tokenManager.isGuest() && NetworkUtil.isOnline(this@MainActivity)) {
+                            checkUnsyncedNotes()
+                        }
                     } catch (e: Exception) {
                         toast("Ошибка при создании")
                         e.printStackTrace()
@@ -366,6 +534,9 @@ class MainActivity : AppCompatActivity() {
                     try {
                         repo.updateNoteTitle(note.id, newTitle)
                         toast("Название изменено на: $newTitle")
+                        if (!tokenManager.isGuest() && NetworkUtil.isOnline(this@MainActivity)) {
+                            checkUnsyncedNotes()
+                        }
                     } catch (e: Exception) {
                         toast("Ошибка при переименовании")
                         e.printStackTrace()
