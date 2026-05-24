@@ -13,12 +13,18 @@ import com.example.vulpinetasks.databinding.DialogRegisterBinding
 import com.example.vulpinetasks.room.AppGraph
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.*
 
 class LoginActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityLoginBinding
     private lateinit var tokenManager: TokenManager
     private var registerDialog: Dialog? = null
+
+    companion object {
+        private const val DATE_FORMAT = "dd.MM.yyyy"
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -158,6 +164,10 @@ class LoginActivity : AppCompatActivity() {
 
                 val response = RetrofitClient.api.register(AuthRequest(email, password))
 
+                // Сохраняем дату регистрации из ответа сервера
+                val creationDate = response.createdAt ?: SimpleDateFormat(DATE_FORMAT, Locale.getDefault()).format(Date())
+                tokenManager.saveAccountCreationDate(creationDate)
+
                 toast("Регистрация успешна! Теперь войдите.")
                 registerDialog?.dismiss()
 
@@ -190,9 +200,59 @@ class LoginActivity : AppCompatActivity() {
             binding.loginCard.visibility = View.GONE
             binding.profileCard.visibility = View.VISIBLE
             binding.userEmail.text = tokenManager.getEmail() ?: "Unknown user"
+
+            // Получаем и отображаем дату создания аккаунта
+            val creationDate = tokenManager.getAccountCreationDate()
+            if (creationDate != null && creationDate.isNotEmpty()) {
+                binding.accountCreationDate.text = "с $creationDate"
+                binding.accountCreationDate.visibility = View.VISIBLE
+            } else {
+                // Если даты нет, пытаемся получить с сервера
+                lifecycleScope.launch {
+                    fetchAccountCreationDate()
+                }
+            }
         } else {
             binding.loginCard.visibility = View.VISIBLE
             binding.profileCard.visibility = View.GONE
+        }
+    }
+
+    private suspend fun fetchAccountCreationDate() {
+        try {
+            val userId = tokenManager.getUserId() ?: return
+            val userInfo = RetrofitClient.api.getUserInfo(userId)
+            if (userInfo.createdAt != null) {
+                val formattedDate = formatDate(userInfo.createdAt)
+                tokenManager.saveAccountCreationDate(formattedDate)
+                binding.accountCreationDate.text = "с $formattedDate"
+                binding.accountCreationDate.visibility = View.VISIBLE
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            // Если не удалось получить дату, показываем заглушку
+            binding.accountCreationDate.text = "дата неизвестна"
+            binding.accountCreationDate.visibility = View.VISIBLE
+        }
+    }
+
+    private fun formatDate(dateString: String): String {
+        return try {
+            // Пробуем распарсить ISO формат
+            val isoFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.getDefault())
+            val date = isoFormat.parse(dateString)
+            val outputFormat = SimpleDateFormat(DATE_FORMAT, Locale.getDefault())
+            outputFormat.format(date)
+        } catch (e: Exception) {
+            try {
+                // Пробуем другой формат
+                val simpleFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+                val date = simpleFormat.parse(dateString)
+                val outputFormat = SimpleDateFormat(DATE_FORMAT, Locale.getDefault())
+                outputFormat.format(date)
+            } catch (e2: Exception) {
+                dateString.take(10) // Возвращаем первые 10 символов если ничего не сработало
+            }
         }
     }
 
@@ -217,6 +277,23 @@ class LoginActivity : AppCompatActivity() {
                 tokenManager.saveUserId(res.userId)
                 tokenManager.saveEmail(email)
                 tokenManager.setGuestMode(false)
+
+                // Получаем и сохраняем дату создания аккаунта с сервера
+                try {
+                    val userInfo = RetrofitClient.api.getUserInfo(res.userId)
+                    if (userInfo.createdAt != null) {
+                        val formattedDate = formatDate(userInfo.createdAt)
+                        tokenManager.saveAccountCreationDate(formattedDate)
+                    } else {
+                        // Если сервер не вернул дату, используем текущую
+                        val currentDate = SimpleDateFormat(DATE_FORMAT, Locale.getDefault()).format(Date())
+                        tokenManager.saveAccountCreationDate(currentDate)
+                    }
+                } catch (e: Exception) {
+                    // Если не удалось получить дату, используем текущую
+                    val currentDate = SimpleDateFormat(DATE_FORMAT, Locale.getDefault()).format(Date())
+                    tokenManager.saveAccountCreationDate(currentDate)
+                }
 
                 AppGraph.notesRepository.fetchFromServer(res.userId)
 

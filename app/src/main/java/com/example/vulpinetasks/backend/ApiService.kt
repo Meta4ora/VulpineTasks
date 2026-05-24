@@ -10,7 +10,16 @@ data class AuthRequest(
 
 data class AuthResponse(
     val token: String,
-    val userId: String
+    val userId: String,
+    val email: String? = null,
+    val createdAt: String? = null
+)
+
+data class UserInfo(
+    val userId: String,
+    val email: String,
+    val createdAt: String? = null,
+    val updatedAt: String? = null
 )
 
 data class CreateNoteRequest(
@@ -113,4 +122,7 @@ interface ApiService {
         @Path("id") id: String,
         @Header("Authorization") token: String
     )
+
+    @GET("api/users/{userId}")
+    suspend fun getUserInfo(@Path("userId") userId: String): UserInfo
 }

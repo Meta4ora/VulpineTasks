@@ -98,7 +98,8 @@
                     android:textSize="16sp"
                     android:textStyle="bold"
                     android:textColor="#FFFFFF"
-                    android:backgroundTint="#2196F3" />
+                    android:backgroundTint="#2196F3"
+                    app:cornerRadius="28dp" />
 
                 <!-- Кнопка регистрации -->
                 <Button
@@ -110,7 +111,10 @@
                     android:textSize="16sp"
                     android:textStyle="bold"
                     android:textColor="#2196F3"
-                    android:backgroundTint="#FFFFFF" />
+                    android:backgroundTint="#FFFFFF"
+                    app:cornerRadius="28dp"
+                    android:stateListAnimator="@null"
+                    android:elevation="0dp" />
 
                 <View
                     android:layout_width="match_parent"
@@ -126,7 +130,8 @@
                     android:text="Гостевой вход"
                     android:textSize="14sp"
                     android:textColor="#FFFFFF"
-                    android:backgroundTint="#607D8B" />
+                    android:backgroundTint="#607D8B"
+                    app:cornerRadius="28dp" />
 
             </LinearLayout>
 
@@ -152,7 +157,7 @@
                 <View
                     android:layout_width="80dp"
                     android:layout_height="80dp"
-                    android:background="@drawable/circle_placeholder"
+                    android:background="@drawable/ic_logo"
                     android:elevation="4dp"
                     android:layout_marginBottom="16dp" />
 
@@ -165,6 +170,16 @@
                     android:textStyle="bold"
                     android:textColor="#212121"
                     android:layout_marginTop="16dp" />
+
+                <TextView
+                    android:id="@+id/accountCreationDate"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:text="с 01.01.2024"
+                    android:textSize="13sp"
+                    android:textColor="#757575"
+                    android:visibility="gone" />
 
                 <TextView
                     android:layout_width="wrap_content"
@@ -180,15 +195,20 @@
                     android:layout_marginVertical="24dp"
                     android:background="#E0E0E0" />
 
-                <Button
+                <!-- Стилизованная кнопка Назад -->
+                <com.google.android.material.button.MaterialButton
                     android:id="@+id/backButton"
-                    android:layout_width="wrap_content"
-                    android:layout_height="40dp"
-                    android:text="← Назад"
-                    android:textColor="#2196F3"
-                    android:backgroundTint="@android:color/transparent" />
+                    android:layout_width="match_parent"
+                    android:layout_height="55dp"
+                    android:text="Назад"
+                    android:textSize="16sp"
+                    android:textColor="#FFFFFF"
+                    android:backgroundTint="#2196F3"
+                    app:cornerRadius="20dp"
+                    style="@style/Widget.Material3.Button.TextButton" />
 
-                <Button
+                <!-- Стилизованная красная кнопка выхода -->
+                <com.google.android.material.button.MaterialButton
                     android:id="@+id/logoutButton"
                     android:layout_width="match_parent"
                     android:layout_height="55dp"
@@ -197,7 +217,9 @@
                     android:textSize="16sp"
                     android:textStyle="bold"
                     android:textColor="#FFFFFF"
-                    android:backgroundTint="#F44336" />
+                    android:backgroundTint="#F44336"
+                    app:cornerRadius="28dp"
+                    app:rippleColor="#80FFFFFF" />
 
             </LinearLayout>
 
