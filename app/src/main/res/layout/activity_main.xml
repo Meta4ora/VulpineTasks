@@ -34,15 +34,6 @@
                 android:layout_height="wrap_content"
                 android:padding="16dp">
 
-                <View
-                    android:id="@+id/logo_placeholder"
-                    android:layout_width="40dp"
-                    android:layout_height="40dp"
-                    android:background="@drawable/circle_placeholder"
-                    app:layout_constraintStart_toStartOf="parent"
-                    app:layout_constraintTop_toTopOf="parent"
-                    app:layout_constraintBottom_toBottomOf="parent" />
-
                 <TextView
                     android:id="@+id/title_text"
                     android:layout_width="0dp"
@@ -52,7 +43,6 @@
                     android:textColor="@android:color/white"
                     android:textSize="22sp"
                     android:textStyle="bold"
-                    app:layout_constraintStart_toEndOf="@id/logo_placeholder"
                     app:layout_constraintTop_toTopOf="parent"
                     app:layout_constraintBottom_toBottomOf="parent" />
 
