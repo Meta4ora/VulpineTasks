@@ -783,7 +783,17 @@ class NotesRepository(
         }
     }
 
+    suspend fun hasUnsyncedNotes(userId: String): Boolean {
+        val unsynced = dao.getUnsyncedNotes(userId)
+        return unsynced.isNotEmpty()
+    }
+
+    suspend fun getUnsyncedNotesCount(userId: String): Int {
+        return dao.getUnsyncedNotes(userId).size
+    }
+
     suspend fun getNoteByIdRaw(noteId: String): NoteEntity? {
         return dao.getNoteById(noteId)
     }
+
 }

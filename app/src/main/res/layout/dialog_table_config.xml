@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="16dp">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Количество строк:"
+        android:textSize="14sp" />
+
+    <SeekBar
+        android:id="@+id/seekBarRows"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:max="6"
+        android:progress="2" />
+
+    <TextView
+        android:id="@+id/tvRows"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Строк: 2"
+        android:layout_marginBottom="16dp" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Количество столбцов:"
+        android:textSize="14sp" />
+
+    <SeekBar
+        android:id="@+id/seekBarCols"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:max="5"
+        android:progress="2" />
+
+    <TextView
+        android:id="@+id/tvCols"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Столбцов: 2" />
+
+</LinearLayout>

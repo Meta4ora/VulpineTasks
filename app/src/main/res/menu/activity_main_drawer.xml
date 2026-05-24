@@ -3,22 +3,19 @@
     <group android:checkableBehavior="single">
         <item
             android:id="@+id/nav_login"
+            android:icon="@drawable/ic_account"
             android:title="Аккаунт" />
         <item
             android:id="@+id/nav_all_notes"
-            android:icon="@drawable/ic_more_vert"
+            android:icon="@drawable/ic_notes"
             android:title="Все заметки" />
         <item
-            android:id="@+id/nav_favorites"
-            android:icon="@drawable/ic_more_vert"
-            android:title="Избранное" />
-        <item
             android:id="@+id/nav_trash"
-            android:icon="@drawable/ic_more_vert"
+            android:icon="@drawable/ic_trash"
             android:title="Корзина" />
         <item
             android:id="@+id/nav_settings"
-            android:icon="@drawable/ic_more_vert"
+            android:icon="@drawable/ic_settings"
             android:title="Настройки" />
     </group>
 </menu>

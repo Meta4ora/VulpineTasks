@@ -3,11 +3,19 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#F5F5F5">
+    android:background="#F5F5F5"
+    android:fitsSystemWindows="true">
 
-    <com.google.android.material.appbar.AppBarLayout
+    <!-- Закруглённый Toolbar -->
+    <androidx.cardview.widget.CardView
+        android:id="@+id/toolbar_card"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content">
+        android:layout_height="wrap_content"
+        android:layout_marginHorizontal="8dp"
+        android:layout_marginTop="8dp"
+        app:cardCornerRadius="24dp"
+        app:cardElevation="4dp"
+        app:cardBackgroundColor="#2196F3">
 
         <androidx.appcompat.widget.Toolbar
             android:id="@+id/toolbar"
@@ -15,215 +23,316 @@
             android:layout_height="?attr/actionBarSize"
             android:background="#2196F3"
             app:titleTextColor="@android:color/white"
-            app:navigationIcon="@drawable/ic_arrow_back" />
+            app:navigationIcon="@drawable/ic_arrow_back"
+            app:navigationIconTint="@android:color/white" />
 
-    </com.google.android.material.appbar.AppBarLayout>
+    </androidx.cardview.widget.CardView>
 
-    <LinearLayout
+    <!-- Основной контент -->
+    <androidx.core.widget.NestedScrollView
+        android:id="@+id/scroll_view"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:layout_marginTop="?attr/actionBarSize"
-        android:orientation="vertical">
+        android:fillViewport="true"
+        android:clipToPadding="false"
+        android:paddingBottom="160dp">
 
-        <!-- Секция с вложенными заметками -->
         <LinearLayout
-            android:id="@+id/tags_section"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:padding="12dp"
-            android:background="#FFFFFF"
-            android:visibility="gone">
-
-            <TextView
-                android:id="@+id/tags_title"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Вложенные заметки"
-                android:textSize="14sp"
-                android:textColor="#666666"
-                android:textStyle="bold"
-                android:layout_marginBottom="8dp" />
-
-            <HorizontalScrollView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginBottom="8dp"
-                android:scrollbars="none">
-
-                <androidx.recyclerview.widget.RecyclerView
-                    android:id="@+id/child_notes_recycler_view"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:orientation="horizontal" />
-
-            </HorizontalScrollView>
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/add_tag_button"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="+ Добавить вложенную заметку"
-                android:textSize="12sp"
-                style="@style/Widget.Material3.Button.TextButton" />
-
-            <View
-                android:layout_width="match_parent"
-                android:layout_height="1dp"
-                android:layout_marginTop="8dp"
-                android:background="#E0E0E0" />
-
-        </LinearLayout>
-
-        <!-- Контейнер для заметки (Rich Text Editor) -->
-        <LinearLayout
-            android:id="@+id/note_editor_container"
-            android:layout_width="match_parent"
-            android:layout_height="0dp"
-            android:layout_weight="1"
-            android:orientation="vertical"
-            android:visibility="gone">
-
-            <!-- Панель форматирования -->
-            <HorizontalScrollView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:background="#F5F5F5"
-                android:padding="8dp">
-
-                <LinearLayout
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:orientation="horizontal">
-
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/btn_bold"
-                        style="@style/Widget.Material3.Button.IconButton"
-                        android:layout_width="48dp"
-                        android:layout_height="48dp"
-                        android:text="B"
-                        android:textStyle="bold" />
-
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/btn_italic"
-                        style="@style/Widget.Material3.Button.IconButton"
-                        android:layout_width="48dp"
-                        android:layout_height="48dp"
-                        android:text="I"
-                        android:textStyle="italic" />
-
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/btn_underline"
-                        style="@style/Widget.Material3.Button.IconButton"
-                        android:layout_width="48dp"
-                        android:layout_height="48dp"
-                        android:text="U" />
-
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/btn_bullet_list"
-                        style="@style/Widget.Material3.Button.IconButton"
-                        android:layout_width="48dp"
-                        android:layout_height="48dp"
-                        android:text="•" />
-
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/btn_number_list"
-                        style="@style/Widget.Material3.Button.IconButton"
-                        android:layout_width="48dp"
-                        android:layout_height="48dp"
-                        android:text="1." />
-
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/btn_heading"
-                        style="@style/Widget.Material3.Button.IconButton"
-                        android:layout_width="48dp"
-                        android:layout_height="48dp"
-                        android:text="H" />
-
-                </LinearLayout>
-
-            </HorizontalScrollView>
-
-            <ScrollView
-                android:layout_width="match_parent"
-                android:layout_height="match_parent"
-                android:padding="16dp">
-
-                <com.google.android.material.textfield.TextInputEditText
-                    android:id="@+id/note_content"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:background="@android:color/white"
-                    android:gravity="top"
-                    android:inputType="textMultiLine"
-                    android:minHeight="400dp"
-                    android:padding="16dp"
-                    android:textSize="16sp"
-                    android:textColor="#212121"
-                    android:textColorHint="#9E9E9E" />
-
-            </ScrollView>
-
-        </LinearLayout>
-
-        <!-- Контейнер для задачи (с подзадачами) -->
-        <LinearLayout
-            android:id="@+id/task_editor_container"
-            android:layout_width="match_parent"
-            android:layout_height="0dp"
-            android:layout_weight="1"
-            android:orientation="vertical"
             android:padding="16dp"
-            android:visibility="gone">
+            android:paddingBottom="60dp">
 
+            <!-- Секция с вложенными заметками -->
             <androidx.cardview.widget.CardView
+                android:id="@+id/tags_section_card"
                 android:layout_width="match_parent"
-                android:layout_height="match_parent"
-                app:cardCornerRadius="12dp"
-                app:cardElevation="2dp">
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="16dp"
+                app:cardCornerRadius="16dp"
+                app:cardElevation="2dp"
+                app:cardBackgroundColor="#FFFFFF"
+                android:visibility="gone">
 
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="vertical"
-                    android:padding="16dp">
+                    android:padding="12dp">
 
                     <TextView
+                        android:id="@+id/tags_title"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Подзадачи"
-                        android:textSize="18sp"
-                        android:textStyle="bold" />
+                        android:text="Вложенные заметки"
+                        android:textSize="14sp"
+                        android:textColor="#666666"
+                        android:textStyle="bold"
+                        android:layout_marginBottom="8dp" />
 
-                    <androidx.recyclerview.widget.RecyclerView
-                        android:id="@+id/subtasks_recycler_view"
+                    <HorizontalScrollView
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="8dp" />
+                        android:layout_marginBottom="8dp"
+                        android:scrollbars="none">
+
+                        <androidx.recyclerview.widget.RecyclerView
+                            android:id="@+id/child_notes_recycler_view"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal" />
+
+                    </HorizontalScrollView>
 
                     <com.google.android.material.button.MaterialButton
-                        android:id="@+id/btn_add_subtask"
+                        android:id="@+id/add_tag_button"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="8dp"
-                        android:text="+ Добавить подзадачу"
+                        android:text="+ Добавить вложенную заметку"
+                        android:textSize="14sp"
                         style="@style/Widget.Material3.Button.TextButton" />
 
                 </LinearLayout>
 
             </androidx.cardview.widget.CardView>
 
+            <!-- Контейнер для заметки -->
+            <LinearLayout
+                android:id="@+id/note_editor_container"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:visibility="gone">
+
+                <androidx.cardview.widget.CardView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    app:cardCornerRadius="16dp"
+                    app:cardElevation="2dp"
+                    app:cardBackgroundColor="#FFFFFF">
+
+                    <WebView
+                        android:id="@+id/note_webview"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:background="#FFFFFF"
+                        android:focusable="true"
+                        android:focusableInTouchMode="true"
+                        android:minHeight="400dp" />
+
+                </androidx.cardview.widget.CardView>
+
+            </LinearLayout>
+
+            <!-- Контейнер для задачи -->
+            <LinearLayout
+                android:id="@+id/task_editor_container"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:visibility="gone">
+
+                <androidx.cardview.widget.CardView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    app:cardCornerRadius="16dp"
+                    app:cardElevation="2dp"
+                    app:cardBackgroundColor="#FFFFFF">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:padding="16dp">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Подзадачи"
+                            android:textSize="18sp"
+                            android:textStyle="bold"
+                            android:textColor="#212121" />
+
+                        <androidx.recyclerview.widget.RecyclerView
+                            android:id="@+id/subtasks_recycler_view"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btn_add_subtask"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:text="+ Добавить подзадачу"
+                            android:textSize="14sp"
+                            style="@style/Widget.Material3.Button.TextButton" />
+
+                    </LinearLayout>
+
+                </androidx.cardview.widget.CardView>
+
+            </LinearLayout>
+
         </LinearLayout>
 
-    </LinearLayout>
+    </androidx.core.widget.NestedScrollView>
 
+    <!-- Панель форматирования (фиксированное положение) -->
+    <androidx.cardview.widget.CardView
+        android:id="@+id/formatting_panel_container"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:layout_marginHorizontal="8dp"
+        android:layout_marginBottom="8dp"
+        app:cardCornerRadius="28dp"
+        app:cardElevation="4dp"
+        app:cardBackgroundColor="#FFFFFF">
+
+        <HorizontalScrollView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:scrollbars="none"
+            android:padding="4dp">
+
+            <LinearLayout
+                android:id="@+id/formatting_panel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:padding="4dp">
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_undo"
+                    style="@style/Widget.Material3.Button.IconButton"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:text="↩️"
+                    android:textSize="18sp"
+                    android:background="@drawable/bg_button_rounded" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_redo"
+                    style="@style/Widget.Material3.Button.IconButton"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:text="↪️"
+                    android:textSize="18sp"
+                    android:background="@drawable/bg_button_rounded" />
+
+                <View
+                    android:layout_width="1dp"
+                    android:layout_height="28dp"
+                    android:layout_marginHorizontal="4dp"
+                    android:background="#E0E0E0" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_bold"
+                    style="@style/Widget.Material3.Button.IconButton"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:text="B"
+                    android:textStyle="bold"
+                    android:textSize="18sp"
+                    android:background="@drawable/bg_button_rounded" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_italic"
+                    style="@style/Widget.Material3.Button.IconButton"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:text="I"
+                    android:textStyle="italic"
+                    android:textSize="18sp"
+                    android:background="@drawable/bg_button_rounded" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_underline"
+                    style="@style/Widget.Material3.Button.IconButton"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:text="U"
+                    android:textSize="18sp"
+                    android:background="@drawable/bg_button_rounded" />
+
+                <View
+                    android:layout_width="1dp"
+                    android:layout_height="28dp"
+                    android:layout_marginHorizontal="4dp"
+                    android:background="#E0E0E0" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_bullet_list"
+                    style="@style/Widget.Material3.Button.IconButton"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:text="•"
+                    android:textSize="20sp"
+                    android:background="@drawable/bg_button_rounded" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_number_list"
+                    style="@style/Widget.Material3.Button.IconButton"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:text="1."
+                    android:textSize="16sp"
+                    android:background="@drawable/bg_button_rounded" />
+
+                <View
+                    android:layout_width="1dp"
+                    android:layout_height="28dp"
+                    android:layout_marginHorizontal="4dp"
+                    android:background="#E0E0E0" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_heading"
+                    style="@style/Widget.Material3.Button.IconButton"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:text="H"
+                    android:textStyle="bold"
+                    android:textSize="18sp"
+                    android:background="@drawable/bg_button_rounded" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_table"
+                    style="@style/Widget.Material3.Button.IconButton"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:text="⊞"
+                    android:textSize="18sp"
+                    android:background="@drawable/bg_button_rounded" />
+
+                <!-- Внутри LinearLayout с id formatting_panel, после кнопки btn_table -->
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_delete_table"
+                    style="@style/Widget.Material3.Button.IconButton"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:text="🗑️"
+                    android:textSize="18sp"
+                    android:background="@drawable/bg_button_rounded" />
+
+            </LinearLayout>
+
+        </HorizontalScrollView>
+
+    </androidx.cardview.widget.CardView>
+
+    <!-- Плавающая кнопка сохранения -->
     <com.google.android.material.floatingactionbutton.FloatingActionButton
         android:id="@+id/fab_save"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_gravity="bottom|end"
         android:layout_margin="16dp"
-        android:src="@android:drawable/ic_menu_save"
+        android:layout_marginBottom="200dp"
+        android:src="@drawable/ic_save"
         app:backgroundTint="#2196F3"
         app:tint="@android:color/white" />
 

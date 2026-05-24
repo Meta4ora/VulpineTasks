@@ -1,25 +1,35 @@
 package com.example.vulpinetasks
 
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
+import android.graphics.Rect
+import android.os.Build
 import android.os.Bundle
-import android.text.Html
-import android.text.Spannable
-import android.text.Spanned
-import android.text.style.StyleSpan
-import android.text.style.UnderlineSpan
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import android.view.View
+import android.view.ViewTreeObserver
+import android.webkit.JavascriptInterface
+import android.webkit.WebChromeClient
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import android.widget.EditText
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.text.HtmlCompat
+import androidx.coordinatorlayout.widget.CoordinatorLayout
 import androidx.lifecycle.lifecycleScope
+import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.example.vulpinetasks.backend.NoteDto
 import com.example.vulpinetasks.backend.SubTaskDto
 import com.example.vulpinetasks.backend.TokenManager
 import com.example.vulpinetasks.databinding.ActivityNoteEditorBinding
 import com.example.vulpinetasks.room.AppGraph
+import com.example.vulpinetasks.utils.SettingsManager
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -30,6 +40,7 @@ class NoteEditorActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityNoteEditorBinding
     private lateinit var tokenManager: TokenManager
+    private lateinit var settingsManager: SettingsManager
     private var noteId: String? = null
     private var userId: String? = null
     private var originalContent: String = ""
@@ -40,6 +51,10 @@ class NoteEditorActivity : AppCompatActivity() {
     private var subtasks = mutableListOf<SubTaskDto>()
     private var isSaving = false
     private var saveJob: Job? = null
+    private var currentHtml = ""
+    private var isContentLoaded = false
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private var settingsReceiver: BroadcastReceiver? = null
 
     companion object {
         private const val TAG = "NOTE_EDITOR"
@@ -52,30 +67,239 @@ class NoteEditorActivity : AppCompatActivity() {
         setContentView(binding.root)
 
         tokenManager = TokenManager(this)
+        settingsManager = SettingsManager(this)
         noteId = intent.getStringExtra("note_id")
         noteTitle = intent.getStringExtra("note_title") ?: "Заметка"
         userId = tokenManager.getUserId()
 
-        Log.d(TAG, "=== onCreate ===")
-        Log.d(TAG, "noteId: $noteId")
-        Log.d(TAG, "noteTitle: $noteTitle")
-
+        setupWebView()
         loadNoteType()
-
         setupToolbar()
         loadContent()
         setupChildNotesSection()
         loadChildNotes()
         setupSaveButton()
         setupAddChildNoteButton()
+        setupFormatButtons()
+        setupKeyboardListener()
+        registerSettingsReceiver()
+        applyKeepScreenOnSetting()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        settingsReceiver?.let { LocalBroadcastManager.getInstance(this).unregisterReceiver(it) }
+    }
+
+    private fun registerSettingsReceiver() {
+        settingsReceiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                if (intent?.action == SettingsManager.ACTION_SETTINGS_CHANGED) {
+                    applyKeepScreenOnSetting()
+                    applyWebViewStyles()
+                }
+            }
+        }
+        LocalBroadcastManager.getInstance(this).registerReceiver(
+            settingsReceiver!!,
+            IntentFilter(SettingsManager.ACTION_SETTINGS_CHANGED)
+        )
+    }
+
+    private fun applyKeepScreenOnSetting() {
+        if (settingsManager.isKeepScreenOn()) {
+            window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        } else {
+            window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+    }
+
+    private fun applyWebViewStyles() {
+        // Применяем настройку переноса слов через CSS
+        val wordWrapStyle = if (settingsManager.isWordWrapEnabled()) {
+            "word-wrap: break-word; white-space: normal;"
+        } else {
+            "word-wrap: normal; white-space: nowrap;"
+        }
+
+        val js = """
+            javascript:(function() {
+                var style = document.createElement('style');
+                style.innerHTML = `
+                    body {
+                        $wordWrapStyle
+                        overflow-x: auto;
+                    }
+                `;
+                document.head.appendChild(style);
+            })();
+        """.trimIndent()
+
+        binding.noteWebview.loadUrl(js)
+    }
+
+    private fun setupWebView() {
+        binding.noteWebview.apply {
+            settings.javaScriptEnabled = true
+            settings.useWideViewPort = true
+            settings.loadWithOverviewMode = true
+            settings.setSupportZoom(true)
+            settings.builtInZoomControls = true
+            settings.displayZoomControls = false
+            settings.domStorageEnabled = true
+            settings.setSupportMultipleWindows(false)
+
+            addJavascriptInterface(WebAppInterface(), "Android")
+
+            webViewClient = object : WebViewClient() {
+                override fun onPageFinished(view: WebView?, url: String?) {
+                    super.onPageFinished(view, url)
+                    view?.loadUrl("javascript:document.body.contentEditable = true;")
+                    view?.loadUrl("javascript:document.body.focus();")
+                    isContentLoaded = true
+
+                    // Применяем CSS стили
+                    applyWebViewStyles()
+
+                    // Применяем настройку прокрутки к курсору
+                    if (settingsManager.isScrollToCursorEnabled()) {
+                        applyScrollToCursorJs()
+                    }
+
+                    applyAutoCapitalizeJs()
+                }
+            }
+            webChromeClient = WebChromeClient()
+            isFocusable = true
+            isFocusableInTouchMode = true
+            requestFocus()
+        }
+    }
+
+    private fun applyScrollToCursorJs() {
+        val cursorJs = """
+            javascript:(function() {
+                function scrollToCursor() {
+                    var selection = window.getSelection();
+                    if (selection.rangeCount > 0) {
+                        var range = selection.getRangeAt(0);
+                        var rect = range.getBoundingClientRect();
+                        if (rect) {
+                            var targetScroll = rect.top + window.scrollY - 100;
+                            window.scrollTo({ top: targetScroll, behavior: 'smooth' });
+                        }
+                    }
+                }
+                document.addEventListener('selectionchange', function() { scrollToCursor(); });
+                document.addEventListener('input', function() { setTimeout(scrollToCursor, 10); });
+                document.addEventListener('keyup', function(e) { setTimeout(scrollToCursor, 10); });
+                document.addEventListener('touchend', function() { setTimeout(scrollToCursor, 100); });
+            })()
+        """.trimIndent()
+        binding.noteWebview.loadUrl(cursorJs)
+    }
+
+    private fun applyAutoCapitalizeJs() {
+        if (settingsManager.isAutoCapitalizeEnabled()) {
+            val autoCapitalizeJs = """
+                javascript:(function() {
+                    document.addEventListener('input', function(e) {
+                        var selection = window.getSelection();
+                        if (selection.rangeCount > 0) {
+                            var range = selection.getRangeAt(0);
+                            var node = range.startContainer;
+                            if (node.nodeType === 3 && node.textContent.length === 1) {
+                                var text = node.textContent;
+                                if (text.match(/[a-zа-я]/)) {
+                                    node.textContent = text.toUpperCase();
+                                    range.setStart(node, 1);
+                                    range.collapse(true);
+                                    selection.removeAllRanges();
+                                    selection.addRange(range);
+                                }
+                            }
+                        }
+                    });
+                })()
+            """.trimIndent()
+            binding.noteWebview.loadUrl(autoCapitalizeJs)
+        }
+    }
+
+    private fun setupKeyboardListener() {
+        var originalFabBottomMargin = 200
+        var originalPanelBottomMargin = 8
+
+        binding.root.viewTreeObserver.addOnGlobalLayoutListener(object : ViewTreeObserver.OnGlobalLayoutListener {
+            override fun onGlobalLayout() {
+                val rect = Rect()
+                binding.root.getWindowVisibleDisplayFrame(rect)
+                val screenHeight = binding.root.height
+                val keypadHeight = screenHeight - rect.bottom
+                val fixedRaiseHeight = 80
+
+                if (keypadHeight > screenHeight * 0.15) {
+                    val fabParams = binding.fabSave.layoutParams as CoordinatorLayout.LayoutParams
+                    fabParams.bottomMargin = originalFabBottomMargin + fixedRaiseHeight + 24
+                    binding.fabSave.layoutParams = fabParams
+
+                    val panelParams = binding.formattingPanelContainer.layoutParams as CoordinatorLayout.LayoutParams
+                    panelParams.bottomMargin = originalPanelBottomMargin + fixedRaiseHeight
+                    binding.formattingPanelContainer.layoutParams = panelParams
+
+                    binding.scrollView.setPadding(0, 0, 0, fixedRaiseHeight + 120)
+                } else {
+                    val fabParams = binding.fabSave.layoutParams as CoordinatorLayout.LayoutParams
+                    fabParams.bottomMargin = originalFabBottomMargin
+                    binding.fabSave.layoutParams = fabParams
+
+                    val panelParams = binding.formattingPanelContainer.layoutParams as CoordinatorLayout.LayoutParams
+                    panelParams.bottomMargin = originalPanelBottomMargin
+                    binding.formattingPanelContainer.layoutParams = panelParams
+
+                    binding.scrollView.setPadding(0, 0, 0, 60)
+                }
+            }
+        })
+    }
+
+    inner class WebAppInterface {
+        @JavascriptInterface
+        fun setContent(html: String) {
+            mainHandler.post {
+                currentHtml = html
+                Log.d(TAG, "Content updated from WebView, length: ${html.length}")
+            }
+        }
+
+        @JavascriptInterface
+        fun showToast(message: String) {
+            mainHandler.post {
+                Toast.makeText(this@NoteEditorActivity, message, Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        @JavascriptInterface
+        fun showTableOptions(tableHtml: String) {
+            mainHandler.post {
+                val options = arrayOf("Удалить таблицу", "Очистить содержимое", "Отмена")
+                AlertDialog.Builder(this@NoteEditorActivity)
+                    .setTitle("Действия с таблицей")
+                    .setItems(options) { _, which ->
+                        when (which) {
+                            0 -> deleteCurrentTable()
+                            1 -> clearTableContent()
+                        }
+                    }
+                    .show()
+            }
+        }
     }
 
     private fun loadNoteType() {
         lifecycleScope.launch {
             val note = AppGraph.notesRepository.getNoteByIdRaw(noteId ?: return@launch)
             noteType = note?.type ?: "note"
-
-            Log.d(TAG, "Note type: $noteType")
 
             if (noteType == "task") {
                 showTaskEditor()
@@ -88,57 +312,293 @@ class NoteEditorActivity : AppCompatActivity() {
     private fun showNoteEditor() {
         binding.noteEditorContainer.visibility = View.VISIBLE
         binding.taskEditorContainer.visibility = View.GONE
-        setupFormatButtons()
+        binding.formattingPanelContainer.visibility = View.VISIBLE
     }
 
     private fun showTaskEditor() {
         binding.noteEditorContainer.visibility = View.GONE
         binding.taskEditorContainer.visibility = View.VISIBLE
+        binding.formattingPanelContainer.visibility = View.GONE
         setupSubtasksRecyclerView()
         setupAddSubtaskButton()
     }
 
     private fun setupFormatButtons() {
-        binding.btnBold.setOnClickListener { applyStyle(StyleSpan(android.graphics.Typeface.BOLD)) }
-        binding.btnItalic.setOnClickListener { applyStyle(StyleSpan(android.graphics.Typeface.ITALIC)) }
-        binding.btnUnderline.setOnClickListener { applyStyle(UnderlineSpan()) }
-        binding.btnBulletList.setOnClickListener { insertBullet() }
-        binding.btnNumberList.setOnClickListener { insertNumber() }
-        binding.btnHeading.setOnClickListener { applyHeading() }
+        binding.btnUndo.setOnClickListener { undo() }
+        binding.btnRedo.setOnClickListener { redo() }
+
+        binding.btnBold.setOnClickListener {
+            execJs("document.execCommand('bold', false, null);")
+            scheduleAutoSaveForNote()
+        }
+        binding.btnItalic.setOnClickListener {
+            execJs("document.execCommand('italic', false, null);")
+            scheduleAutoSaveForNote()
+        }
+        binding.btnUnderline.setOnClickListener {
+            execJs("document.execCommand('underline', false, null);")
+            scheduleAutoSaveForNote()
+        }
+        binding.btnBulletList.setOnClickListener {
+            execJs("document.execCommand('insertUnorderedList', false, null);")
+            scheduleAutoSaveForNote()
+        }
+        binding.btnNumberList.setOnClickListener {
+            execJs("document.execCommand('insertOrderedList', false, null);")
+            scheduleAutoSaveForNote()
+        }
+        binding.btnHeading.setOnClickListener {
+            execJs("document.execCommand('formatBlock', false, '<h3>');")
+            scheduleAutoSaveForNote()
+        }
+        binding.btnTable.setOnClickListener { showTableDialog() }
+        binding.btnDeleteTable.setOnClickListener { showTableOptionsDialog() }
     }
 
-    private fun applyStyle(span: Any) {
-        val text = binding.noteContent.text
-        val start = binding.noteContent.selectionStart
-        val end = binding.noteContent.selectionEnd
+    private fun showTableOptionsDialog() {
+        val js = """
+            javascript:(function() {
+                var selection = window.getSelection();
+                if (selection.rangeCount > 0) {
+                    var range = selection.getRangeAt(0);
+                    var node = range.startContainer;
+                    
+                    var table = null;
+                    while (node != null && node != document.body) {
+                        if (node.nodeType === 1) {
+                            if (node.tagName === 'TABLE') {
+                                table = node;
+                                break;
+                            }
+                            if (node.tagName === 'TD' || node.tagName === 'TH') {
+                                table = node.closest('table');
+                                break;
+                            }
+                        }
+                        node = node.parentNode;
+                    }
+                    
+                    if (table) {
+                        Android.showTableOptions(table.outerHTML);
+                    } else {
+                        Android.showToast("Пожалуйста, установите курсор внутрь таблицы");
+                    }
+                } else {
+                    Android.showToast("Пожалуйста, установите курсор внутрь таблицы");
+                }
+            })();
+        """.trimIndent()
+        execJs(js)
+    }
 
-        if (start >= 0 && end > start && start < end) {
-            val spannable = text as Spannable
-            spannable.setSpan(span, start, end, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+    private fun deleteCurrentTable() {
+        val js = """
+            (function() {
+                try {
+                    var selection = window.getSelection();
+                    if (!selection || selection.rangeCount === 0) {
+                        Android.showToast("Установите курсор внутрь таблицы");
+                        return;
+                    }
+                    var range = selection.getRangeAt(0);
+                    var node = range.startContainer;
+                    if (node.nodeType === 3) node = node.parentNode;
+                    var table = null;
+                    while (node && node !== document.body) {
+                        if (node.nodeType === 1 && node.tagName && node.tagName.toUpperCase() === 'TABLE') {
+                            table = node;
+                            break;
+                        }
+                        node = node.parentNode;
+                    }
+                    if (!table) {
+                        Android.showToast("Таблица не найдена");
+                        return;
+                    }
+                    var parent = table.parentNode;
+                    if (!parent) {
+                        Android.showToast("Ошибка DOM");
+                        return;
+                    }
+                    var paragraph = document.createElement('p');
+                    paragraph.innerHTML = '<br>';
+                    parent.insertBefore(paragraph, table);
+                    table.remove();
+                    var newRange = document.createRange();
+                    newRange.setStart(paragraph, 0);
+                    newRange.collapse(true);
+                    selection.removeAllRanges();
+                    selection.addRange(newRange);
+                    document.body.dispatchEvent(new Event('input', { bubbles: true }));
+                    Android.showToast("Таблица удалена");
+                } catch(e) {
+                    Android.showToast("Ошибка: " + e.message);
+                }
+            })();
+        """.trimIndent()
+        execJs(js)
+        scheduleAutoSaveForNote()
+    }
+
+    private fun clearTableContent() {
+        val js = """
+            (function() {
+                try {
+                    var selection = window.getSelection();
+                    if (!selection || selection.rangeCount === 0) {
+                        Android.showToast("Установите курсор внутрь таблицы");
+                        return;
+                    }
+                    var range = selection.getRangeAt(0);
+                    var node = range.startContainer;
+                    if (node.nodeType === 3) node = node.parentNode;
+                    var table = null;
+                    while (node && node !== document.body) {
+                        if (node.nodeType === 1 && node.tagName && node.tagName.toUpperCase() === 'TABLE') {
+                            table = node;
+                            break;
+                        }
+                        node = node.parentNode;
+                    }
+                    if (!table) {
+                        Android.showToast("Таблица не найдена");
+                        return;
+                    }
+                    var cells = table.querySelectorAll('td');
+                    for (var i = 0; i < cells.length; i++) {
+                        cells[i].innerHTML = '';
+                    }
+                    var headers = table.querySelectorAll('th');
+                    for (var i = 0; i < headers.length; i++) {
+                        headers[i].innerHTML = 'Заголовок ' + (i + 1);
+                    }
+                    document.body.dispatchEvent(new Event('input', { bubbles: true }));
+                    Android.showToast("Содержимое таблицы очищено");
+                } catch(e) {
+                    Android.showToast("Ошибка: " + e.message);
+                }
+            })();
+        """.trimIndent()
+        execJs(js)
+        scheduleAutoSaveForNote()
+    }
+
+    private fun undo() {
+        execJs("document.execCommand('undo', false, null);")
+        scheduleAutoSaveForNote()
+    }
+
+    private fun redo() {
+        execJs("document.execCommand('redo', false, null);")
+        scheduleAutoSaveForNote()
+    }
+
+    private fun execJs(js: String) {
+        binding.noteWebview.evaluateJavascript(js, null)
+    }
+
+    private fun scheduleAutoSaveForNote() {
+        if (noteType != "task" && isContentLoaded && settingsManager.isAutoSaveEnabled()) {
+            saveJob?.cancel()
+            saveJob = lifecycleScope.launch {
+                delay(SAVE_DELAY_MS)
+                getCurrentHtmlFromWebView()
+            }
         }
     }
 
-    private fun insertBullet() {
-        val position = binding.noteContent.selectionStart
-        val text = binding.noteContent.text
-        text?.insert(position, "• ")
+    private fun getCurrentHtmlFromWebView() {
+        binding.noteWebview.loadUrl("javascript:Android.setContent(document.body.innerHTML);")
+        mainHandler.postDelayed({
+            if (currentHtml != originalContent && currentHtml.isNotBlank()) {
+                lifecycleScope.launch {
+                    saveContentToDatabase(currentHtml)
+                }
+            }
+        }, 200)
     }
 
-    private fun insertNumber() {
-        val position = binding.noteContent.selectionStart
-        val text = binding.noteContent.text
-        text?.insert(position, "1. ")
+    private fun insertTableHtml(rows: Int, cols: Int) {
+        val tableHtml = buildStyledTable(rows, cols)
+        val js = "(function() {" +
+                "var sel = window.getSelection();" +
+                "if (sel.rangeCount > 0) {" +
+                "var range = sel.getRangeAt(0);" +
+                "var div = document.createElement('div');" +
+                "div.innerHTML = `$tableHtml`;" +
+                "range.deleteContents();" +
+                "range.insertNode(div);" +
+                "}" +
+                "})()"
+        execJs(js)
+        scheduleAutoSaveForNote()
     }
 
-    private fun applyHeading() {
-        val text = binding.noteContent.text
-        val start = binding.noteContent.selectionStart
-        val end = binding.noteContent.selectionEnd
-
-        if (start >= 0 && end > start && start < end) {
-            val spannable = text as Spannable
-            spannable.setSpan(StyleSpan(android.graphics.Typeface.BOLD), start, end, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+    private fun buildStyledTable(rows: Int, cols: Int): String {
+        val sb = StringBuilder()
+        sb.append("<div style='overflow-x: auto; margin: 8px 0;'>")
+        sb.append("<table style='border-collapse: collapse; width: 100%; font-family: sans-serif; border: 1px solid #ddd;'>")
+        sb.append("<thead>")
+        sb.append("<tr style='background-color: #2196F3;'>")
+        for (c in 0 until cols) {
+            sb.append("<th style='border: 1px solid #ddd; padding: 8px; text-align: left; color: white;'>Заголовок ${c + 1}</th>")
         }
+        sb.append("<tr>")
+        sb.append("</thead>")
+        sb.append("<tbody>")
+        for (r in 0 until rows - 1) {
+            sb.append("<tr>")
+            for (c in 0 until cols) {
+                sb.append("<td style='border: 1px solid #ddd; padding: 8px;'>Ячейка ${c + 1}浏览")
+            }
+            sb.append("</tr>")
+        }
+        sb.append("</tbody>")
+        sb.append("</table>")
+        sb.append("</div>")
+        return sb.toString()
+    }
+
+    private fun showTableDialog() {
+        val builder = AlertDialog.Builder(this)
+        val view = layoutInflater.inflate(R.layout.dialog_table_config, null)
+        val seekBarRows = view.findViewById<android.widget.SeekBar>(R.id.seekBarRows)
+        val seekBarCols = view.findViewById<android.widget.SeekBar>(R.id.seekBarCols)
+        val tvRows = view.findViewById<android.widget.TextView>(R.id.tvRows)
+        val tvCols = view.findViewById<android.widget.TextView>(R.id.tvCols)
+
+        seekBarRows.max = 6
+        seekBarCols.max = 5
+        var rows = 2
+        var cols = 2
+
+        seekBarRows.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: android.widget.SeekBar?, progress: Int, fromUser: Boolean) {
+                rows = if (progress < 2) 2 else progress
+                tvRows.text = "Строк: $rows"
+                seekBar?.progress = rows
+            }
+            override fun onStartTrackingTouch(seekBar: android.widget.SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: android.widget.SeekBar?) {}
+        })
+
+        seekBarCols.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: android.widget.SeekBar?, progress: Int, fromUser: Boolean) {
+                cols = if (progress < 2) 2 else progress
+                tvCols.text = "Столбцов: $cols"
+                seekBar?.progress = cols
+            }
+            override fun onStartTrackingTouch(seekBar: android.widget.SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: android.widget.SeekBar?) {}
+        })
+
+        builder.setTitle("Вставить таблицу")
+            .setView(view)
+            .setPositiveButton("Вставить") { _, _ ->
+                insertTableHtml(rows, cols)
+            }
+            .setNegativeButton("Отмена", null)
+            .show()
     }
 
     private fun setupSubtasksRecyclerView() {
@@ -155,7 +615,6 @@ class NoteEditorActivity : AppCompatActivity() {
                 scheduleAutoSave()
             }
         )
-
         binding.subtasksRecyclerView.layoutManager = LinearLayoutManager(this)
         binding.subtasksRecyclerView.adapter = subtasksAdapter
     }
@@ -167,7 +626,7 @@ class NoteEditorActivity : AppCompatActivity() {
     }
 
     private fun showAddSubtaskDialog() {
-        val input = android.widget.EditText(this)
+        val input = EditText(this)
         input.hint = "Название подзадачи"
 
         AlertDialog.Builder(this)
@@ -202,7 +661,6 @@ class NoteEditorActivity : AppCompatActivity() {
     private fun setupChildNotesSection() {
         childNotesAdapter = ChildNotesAdapter(
             onNoteClick = { childNote ->
-                Log.d(TAG, "Child note clicked: ${childNote.title}")
                 val intent = Intent(this, NoteEditorActivity::class.java)
                 intent.putExtra("note_id", childNote.id)
                 intent.putExtra("note_title", childNote.title)
@@ -211,104 +669,59 @@ class NoteEditorActivity : AppCompatActivity() {
             onUnlinkClick = { childNote ->
                 lifecycleScope.launch {
                     if (noteId != null) {
-                        Log.d(TAG, "Unlinking child note: ${childNote.id} from parent: $noteId")
                         AppGraph.notesRepository.removeParentRelation(childNote.id, noteId!!)
                         loadChildNotes()
-                        Toast.makeText(
-                            this@NoteEditorActivity,
-                            "Заметка отвязана",
-                            Toast.LENGTH_SHORT
-                        ).show()
+                        Toast.makeText(this@NoteEditorActivity, "Заметка отвязана", Toast.LENGTH_SHORT).show()
                     }
                 }
             }
         )
-
         binding.childNotesRecyclerView.apply {
-            layoutManager = LinearLayoutManager(
-                this@NoteEditorActivity,
-                LinearLayoutManager.HORIZONTAL,
-                false
-            )
+            layoutManager = LinearLayoutManager(this@NoteEditorActivity, LinearLayoutManager.HORIZONTAL, false)
             adapter = childNotesAdapter
             childNotesAdapter?.submitList(emptyList())
         }
     }
 
     private fun loadChildNotes() {
-        Log.d(TAG, "=== loadChildNotes ===")
         lifecycleScope.launch {
             if (noteId != null && userId != null) {
-                Log.d(TAG, "Loading child notes for parentId: $noteId")
-
                 val childNotes = AppGraph.notesRepository.getChildNotes(noteId!!, userId!!)
-                Log.d(TAG, "Child notes found: ${childNotes.size}")
-
                 childNotesAdapter?.submitList(childNotes)
-
-                binding.tagsSection.visibility = View.VISIBLE
-
-                if (childNotes.isEmpty()) {
-                    Log.d(TAG, "No child notes, showing empty section")
-                    binding.tagsTitle.text = "Вложенные заметки (0)"
-                } else {
-                    Log.d(TAG, "Showing child notes section (${childNotes.size} notes)")
-                    binding.tagsTitle.text = "Вложенные заметки (${childNotes.size})"
-                }
+                binding.tagsSectionCard.visibility = View.VISIBLE
+                binding.tagsTitle.text = if (childNotes.isEmpty()) "Вложенные заметки (0)" else "Вложенные заметки (${childNotes.size})"
             }
         }
     }
 
     private fun setupAddChildNoteButton() {
         binding.addTagButton.setOnClickListener {
-            Log.d(TAG, "Add child note button clicked")
             showAddChildNoteDialog()
         }
     }
 
     private fun showAddChildNoteDialog() {
-        Log.d(TAG, "=== showAddChildNoteDialog ===")
         lifecycleScope.launch {
-            val currentNoteId = noteId ?: run {
-                Log.e(TAG, "noteId is null")
-                return@launch
-            }
-            val currentUserId = userId ?: run {
-                Log.e(TAG, "userId is null")
-                return@launch
-            }
-
+            val currentNoteId = noteId ?: return@launch
+            val currentUserId = userId ?: return@launch
             val allNotes = AppGraph.notesRepository.getAllNotes(currentUserId)
             val existingChildIds = AppGraph.notesRepository.getChildNotesIds(currentNoteId)
-
-            val availableNotes = allNotes.filter { note ->
-                note.id != currentNoteId && note.id !in existingChildIds
-            }
+            val availableNotes = allNotes.filter { note -> note.id != currentNoteId && note.id !in existingChildIds }
 
             if (availableNotes.isEmpty()) {
-                Toast.makeText(
-                    this@NoteEditorActivity,
-                    "Нет доступных заметок для добавления",
-                    Toast.LENGTH_LONG
-                ).show()
+                Toast.makeText(this@NoteEditorActivity, "Нет доступных заметок для добавления", Toast.LENGTH_LONG).show()
                 return@launch
             }
 
             val titles = availableNotes.map { it.title }.toTypedArray()
-
             AlertDialog.Builder(this@NoteEditorActivity)
                 .setTitle("Выберите заметку")
                 .setItems(titles) { _, which ->
                     val selectedNote = availableNotes[which]
                     lifecycleScope.launch {
-                        Log.d(TAG, "Adding child note: ${selectedNote.id} to parent: $currentNoteId")
                         AppGraph.notesRepository.addParentRelation(selectedNote.id, currentNoteId)
                         loadChildNotes()
-                        Toast.makeText(
-                            this@NoteEditorActivity,
-                            "Заметка добавлена: ${selectedNote.title}",
-                            Toast.LENGTH_SHORT
-                        ).show()
+                        Toast.makeText(this@NoteEditorActivity, "Заметка добавлена: ${selectedNote.title}", Toast.LENGTH_SHORT).show()
                     }
                 }
                 .setNegativeButton("Отмена", null)
@@ -317,36 +730,94 @@ class NoteEditorActivity : AppCompatActivity() {
     }
 
     private fun loadContent() {
-        Log.d(TAG, "=== loadContent ===")
         lifecycleScope.launch {
             if (noteId != null && userId != null) {
                 showLoading(true)
                 try {
                     val content = AppGraph.notesRepository.getNoteContent(noteId!!, userId!!)
                     originalContent = content
-
-                    Log.d(TAG, "Loaded content length: ${content.length}")
+                    currentHtml = content
 
                     if (noteType == "task") {
                         parseSubtasksFromJson(content)
                         subtasksAdapter?.updateList(subtasks)
-                        Log.d(TAG, "Parsed ${subtasks.size} subtasks")
                     } else {
-                        // Конвертируем HTML в Spanned для отображения форматирования
-                        val spanned = HtmlCompat.fromHtml(content, HtmlCompat.FROM_HTML_MODE_LEGACY)
-                        binding.noteContent.setText(spanned)
+                        val fullHtml = """
+                            <!DOCTYPE html>
+                            <html>
+                            <head>
+                                <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+                                <style>
+                                    * { box-sizing: border-box; }
+                                    body {
+                                        font-family: sans-serif;
+                                        font-size: 16px;
+                                        line-height: 1.5;
+                                        padding: 16px;
+                                        margin: 0;
+                                        background: white;
+                                        color: #212121;
+                                        min-height: 100%;
+                                    }
+                                    h1 { font-size: 28px; margin: 16px 0 8px; }
+                                    h2 { font-size: 24px; margin: 14px 0 8px; }
+                                    h3 { font-size: 20px; margin: 12px 0 8px; }
+                                    p { margin: 8px 0; }
+                                    ul, ol { margin: 8px 0; padding-left: 24px; }
+                                    li { margin: 4px 0; }
+                                    table {
+                                        border-collapse: collapse;
+                                        width: 100%;
+                                        margin: 12px 0;
+                                    }
+                                    th, td {
+                                        border: 1px solid #ddd;
+                                        padding: 8px;
+                                        text-align: left;
+                                    }
+                                    th {
+                                        background-color: #2196F3;
+                                        color: white;
+                                    }
+                                    [contenteditable="true"]:focus {
+                                        outline: none;
+                                    }
+                                </style>
+                            </head>
+                            <body contenteditable="true">
+                                $content
+                            </body>
+                            </html>
+                        """
+                        binding.noteWebview.loadDataWithBaseURL(null, fullHtml, "text/html", "UTF-8", null)
                     }
                 } catch (e: Exception) {
                     Log.e(TAG, "Error loading content", e)
-                    Toast.makeText(this@NoteEditorActivity, "Ошибка загрузки содержимого", Toast.LENGTH_SHORT).show()
                     if (noteType == "task") {
                         subtasks.clear()
                         subtasksAdapter?.updateList(subtasks)
                     } else {
-                        binding.noteContent.setText("# $noteTitle\n\n")
+                        val defaultHtml = """
+                            <!DOCTYPE html>
+                            <html>
+                            <head>
+                                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                                <style>
+                                    body { font-family: sans-serif; padding: 16px; margin: 0; background: white; }
+                                    h1 { color: #2196F3; }
+                                </style>
+                            </head>
+                            <body contenteditable="true">
+                                <h1>$noteTitle</h1>
+                                <p></p>
+                            </body>
+                            </html>
+                        """
+                        binding.noteWebview.loadDataWithBaseURL(null, defaultHtml, "text/html", "UTF-8", null)
                     }
                 } finally {
                     showLoading(false)
+                    isContentLoaded = true
                 }
             }
         }
@@ -358,13 +829,7 @@ class NoteEditorActivity : AppCompatActivity() {
             subtasks.clear()
             for (i in 0 until jsonArray.length()) {
                 val obj = jsonArray.getJSONObject(i)
-                subtasks.add(
-                    SubTaskDto(
-                        id = obj.getString("id"),
-                        title = obj.getString("title"),
-                        isCompleted = obj.getBoolean("isCompleted")
-                    )
-                )
+                subtasks.add(SubTaskDto(id = obj.getString("id"), title = obj.getString("title"), isCompleted = obj.getBoolean("isCompleted")))
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error parsing subtasks JSON", e)
@@ -384,20 +849,24 @@ class NoteEditorActivity : AppCompatActivity() {
         return jsonArray.toString()
     }
 
-    /**
-     * Конвертирует форматированный текст в HTML для сохранения
-     */
-    private fun getFormattedTextAsHtml(): String {
-        val text = binding.noteContent.text
-        if (text is Spanned) {
-            return Html.toHtml(text, Html.TO_HTML_PARAGRAPH_LINES_CONSECUTIVE)
+    private suspend fun saveContentToDatabase(newContent: String) {
+        if (isSaving || newContent == originalContent) return
+        isSaving = true
+        try {
+            if (noteId != null && userId != null) {
+                AppGraph.notesRepository.updateNoteContent(noteId!!, userId!!, newContent)
+                originalContent = newContent
+                Log.d(TAG, "Content saved successfully")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error saving content", e)
+        } finally {
+            isSaving = false
         }
-        return text.toString()
     }
 
     private fun scheduleAutoSave() {
         if (noteType != "task") return
-
         saveJob?.cancel()
         saveJob = lifecycleScope.launch {
             delay(SAVE_DELAY_MS)
@@ -407,26 +876,13 @@ class NoteEditorActivity : AppCompatActivity() {
 
     private suspend fun autoSaveContent() {
         if (isSaving) return
-
-        val newContent = if (noteType == "task") {
-            saveSubtasksToJson()
-        } else {
-            getFormattedTextAsHtml()
-        }
-
-        if (newContent == originalContent) {
-            Log.d(TAG, "Auto-save: content unchanged")
-            return
-        }
-
-        Log.d(TAG, "Auto-saving...")
-
+        val newContent = if (noteType == "task") saveSubtasksToJson() else currentHtml
+        if (newContent == originalContent) return
         isSaving = true
         try {
             if (noteId != null && userId != null) {
                 AppGraph.notesRepository.updateNoteContent(noteId!!, userId!!, newContent)
                 originalContent = newContent
-                Log.d(TAG, "Auto-save completed successfully")
             }
         } catch (e: Exception) {
             Log.e(TAG, "Auto-save failed", e)
@@ -437,85 +893,63 @@ class NoteEditorActivity : AppCompatActivity() {
 
     private fun setupSaveButton() {
         binding.fabSave.setOnClickListener {
-            saveContent()
-        }
-    }
-
-    private fun saveContent() {
-        val newContent = if (noteType == "task") {
-            saveSubtasksToJson()
-        } else {
-            getFormattedTextAsHtml()
-        }
-
-        Log.d(TAG, "saveContent: original length=${originalContent.length}, new length=${newContent.length}")
-
-        if (newContent == originalContent) {
-            finish()
-            return
-        }
-
-        saveJob?.cancel()
-
-        lifecycleScope.launch {
-            if (noteId != null && userId != null) {
-                showLoading(true)
-                try {
-                    Log.d(TAG, "Updating note content")
-                    AppGraph.notesRepository.updateNoteContent(noteId!!, userId!!, newContent)
-                    originalContent = newContent
-                    Toast.makeText(this@NoteEditorActivity, "Сохранено", Toast.LENGTH_SHORT).show()
-                    finish()
-                } catch (e: Exception) {
-                    Log.e(TAG, "Error saving content", e)
-                    Toast.makeText(this@NoteEditorActivity, "Ошибка сохранения", Toast.LENGTH_SHORT).show()
-                } finally {
-                    showLoading(false)
-                }
-            }
+            saveAndClose()
         }
     }
 
     private fun saveAndClose() {
         saveJob?.cancel()
-        saveContent()
+        if (noteType == "task") {
+            val newContent = saveSubtasksToJson()
+            if (newContent != originalContent) {
+                lifecycleScope.launch {
+                    saveContentToDatabase(newContent)
+                    finish()
+                }
+            } else {
+                finish()
+            }
+        } else {
+            binding.noteWebview.loadUrl("javascript:Android.setContent(document.body.innerHTML);")
+            mainHandler.postDelayed({
+                if (currentHtml != originalContent && currentHtml.isNotBlank()) {
+                    lifecycleScope.launch {
+                        saveContentToDatabase(currentHtml)
+                        finish()
+                    }
+                } else {
+                    finish()
+                }
+            }, 300)
+        }
     }
 
     private fun showLoading(show: Boolean) {
         binding.progressBar.visibility = if (show) View.VISIBLE else View.GONE
         binding.fabSave.isEnabled = !show
-
-        if (noteType == "task") {
-            binding.btnAddSubtask.isEnabled = !show
-        } else {
-            binding.noteContent.isEnabled = !show
-        }
     }
 
     override fun onPause() {
         super.onPause()
         if (noteType == "task") {
             saveJob?.cancel()
-            lifecycleScope.launch {
-                autoSaveContent()
-            }
+            lifecycleScope.launch { autoSaveContent() }
         } else {
-            // Для заметок тоже сохраняем при паузе
             saveJob?.cancel()
-            lifecycleScope.launch {
-                if (!isSaving && noteId != null && userId != null) {
-                    val newContent = getFormattedTextAsHtml()
-                    if (newContent != originalContent) {
-                        AppGraph.notesRepository.updateNoteContent(noteId!!, userId!!, newContent)
-                        originalContent = newContent
+            if (isContentLoaded && settingsManager.isAutoSaveEnabled()) {
+                binding.noteWebview.loadUrl("javascript:Android.setContent(document.body.innerHTML);")
+                mainHandler.postDelayed({
+                    if (currentHtml != originalContent && currentHtml.isNotBlank()) {
+                        lifecycleScope.launch {
+                            saveContentToDatabase(currentHtml)
+                        }
                     }
-                }
+                }, 200)
             }
         }
     }
 
     override fun onBackPressed() {
-        super.onBackPressed()
         saveAndClose()
     }
 }

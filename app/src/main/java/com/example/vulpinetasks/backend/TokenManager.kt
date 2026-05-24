@@ -2,6 +2,9 @@ package com.example.vulpinetasks.backend
 
 import android.content.Context
 import android.content.SharedPreferences
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class TokenManager(private val context: Context) {
 
@@ -15,6 +18,7 @@ class TokenManager(private val context: Context) {
         private const val KEY_IS_GUEST = "is_guest"
         private const val KEY_GUEST_USER_ID = "guest_user_id"
         private const val KEY_LAST_LOGGED_USER_ID = "last_logged_user_id"
+        private const val KEY_ACCOUNT_CREATION_DATE = "account_creation_date"
     }
 
     fun saveToken(token: String) {
@@ -74,5 +78,24 @@ class TokenManager(private val context: Context) {
         prefs.edit().clear().apply()
         prefs.edit().putString(KEY_GUEST_USER_ID, guestId).apply()
         setGuestMode(true)
+    }
+
+    fun saveAccountCreationDate(date: String) {
+        prefs.edit().putString(KEY_ACCOUNT_CREATION_DATE, date).apply()
+    }
+
+    fun getAccountCreationDate(): String? {
+        return prefs.getString(KEY_ACCOUNT_CREATION_DATE, null)
+
+    }
+    fun isFirstLogin(): Boolean {
+        return prefs.getString(KEY_ACCOUNT_CREATION_DATE, null) == null
+    }
+
+    fun setAccountCreationDateIfNeeded() {
+        if (getAccountCreationDate() == null) {
+            val currentDate = SimpleDateFormat("dd.MM.yyyy", Locale.getDefault()).format(Date())
+            saveAccountCreationDate(currentDate)
+        }
     }
 }

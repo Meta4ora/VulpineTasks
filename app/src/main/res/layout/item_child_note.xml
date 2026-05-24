@@ -34,7 +34,7 @@
             android:layout_width="20dp"
             android:layout_height="20dp"
             android:layout_marginStart="8dp"
-            android:src="@android:drawable/ic_menu_close_clear_cancel"
+            android:src="@drawable/ic_close"
             android:alpha="0.6"
             android:clickable="true"
             android:focusable="true"
