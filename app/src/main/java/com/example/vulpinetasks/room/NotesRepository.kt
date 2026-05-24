@@ -795,4 +795,5 @@ class NotesRepository(
     suspend fun getNoteByIdRaw(noteId: String): NoteEntity? {
         return dao.getNoteById(noteId)
     }
+
 }
