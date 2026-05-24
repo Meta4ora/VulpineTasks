@@ -2,91 +2,122 @@
 <PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto">
 
-    <!-- Внешний вид -->
+    <!-- Редактирование -->
     <PreferenceCategory
-        android:key="appearance_category"
-        android:title="Внешний вид">
+        android:title="Редактирование"
+        android:key="editing_category">
 
-        <SwitchPreferenceCompat
-            android:key="dark_mode"
-            android:title="Тёмная тема"
-            android:summary="Включить тёмную тему приложения"
-            android:defaultValue="false" />
-
-        <ListPreference
-            android:key="font_size"
-            android:title="Размер шрифта"
-            android:summary="Выберите размер шрифта в редакторе"
-            android:entries="@array/font_size_entries"
-            android:entryValues="@array/font_size_values"
-            android:defaultValue="medium" />
-
-        <SwitchPreferenceCompat
-            android:key="line_numbers"
-            android:title="Нумерация строк"
-            android:summary="Показывать номера строк в редакторе"
-            android:defaultValue="false" />
+        <EditTextPreference
+            android:key="default_title"
+            android:title="Заголовок по умолчанию"
+            android:summary="Заголовок для новых заметок"
+            android:defaultValue="Новая заметка" />
 
         <SwitchPreferenceCompat
             android:key="word_wrap"
             android:title="Перенос слов"
-            android:summary="Переносить длинные слова на новую строку"
+            android:summary="Автоматический перенос длинных слов в редакторе"
             android:defaultValue="true" />
 
     </PreferenceCategory>
 
-    <!-- Редактирование -->
+    <!-- Отображение -->
     <PreferenceCategory
-        android:key="editor_category"
-        android:title="Редактирование">
+        android:title="Отображение"
+        android:key="display_category">
 
         <SwitchPreferenceCompat
-            android:key="auto_save"
-            android:title="Автосохранение"
-            android:summary="Автоматически сохранять заметки при редактировании"
+            android:key="show_word_count"
+            android:title="Счётчик слов"
+            android:summary="Показывать количество слов в списке заметок"
             android:defaultValue="true" />
 
-        <EditTextPreference
-            android:key="default_note_title"
-            android:title="Заголовок по умолчанию"
-            android:summary="Заголовок для новых заметок"
-            android:defaultValue="Новая заметка"
-            android:dialogTitle="Заголовок по умолчанию" />
+        <SwitchPreferenceCompat
+            android:key="show_preview"
+            android:title="Предпросмотр"
+            android:summary="Показывать предварительный текст в списке заметок"
+            android:defaultValue="true" />
+
+        <SwitchPreferenceCompat
+            android:key="compact_view"
+            android:title="Компактный вид"
+            android:summary="Уменьшить отступы в списке заметок"
+            android:defaultValue="false" />
+
+        <ListPreference
+            android:key="animation_speed"
+            android:title="Скорость анимации"
+            android:summary="Скорость анимации переходов"
+            android:entries="@array/animation_speed_entries"
+            android:entryValues="@array/animation_speed_values"
+            android:defaultValue="normal" />
 
     </PreferenceCategory>
 
-    <!-- Синхронизация -->
+    <!-- Поведение -->
     <PreferenceCategory
-        android:key="sync_category"
-        android:title="Синхронизация">
+        android:title="Поведение"
+        android:key="behavior_category">
 
         <SwitchPreferenceCompat
-            android:key="auto_sync"
-            android:title="Автосинхронизация"
-            android:summary="Автоматически синхронизировать заметки с сервером"
+            android:key="confirm_delete"
+            android:title="Подтверждение удаления"
+            android:summary="Запрашивать подтверждение перед удалением заметки"
             android:defaultValue="true" />
 
-        <Preference
-            android:key="sync_now"
-            android:title="Синхронизировать сейчас"
-            android:summary="Выполнить ручную синхронизацию" />
+        <SwitchPreferenceCompat
+            android:key="vibration_on_long_press"
+            android:title="Вибрация"
+            android:summary="Вибрация при долгом нажатии"
+            android:defaultValue="true" />
+
+        <SwitchPreferenceCompat
+            android:key="keep_screen_on"
+            android:title="Не выключать экран"
+            android:summary="Держать экран включённым при редактировании"
+            android:defaultValue="false" />
+
+        <SwitchPreferenceCompat
+            android:key="scroll_to_cursor"
+            android:title="Прокрутка к курсору"
+            android:summary="Автоматически прокручивать к позиции курсора"
+            android:defaultValue="true" />
+
+    </PreferenceCategory>
+
+    <!-- Виртуальные помощники -->
+    <PreferenceCategory
+        android:title="Помощники"
+        android:key="assistants_category">
+
+        <SwitchPreferenceCompat
+            android:key="auto_capitalize"
+            android:title="Автозаглавная буква"
+            android:summary="Автоматически делать первую букву заглавной"
+            android:defaultValue="true" />
+
+        <SwitchPreferenceCompat
+            android:key="auto_correct"
+            android:title="Автоисправление"
+            android:summary="Автоматическое исправление опечаток"
+            android:defaultValue="false" />
 
     </PreferenceCategory>
 
     <!-- Информация -->
     <PreferenceCategory
-        android:key="info_category"
-        android:title="Информация">
+        android:title="Информация"
+        android:key="info_category">
 
         <Preference
-            android:key="version"
-            android:title="Версия приложения"
-            android:summary="1.0.0" />
+            android:key="stats_info"
+            android:title="Статистика"
+            android:summary="Всего заметок, слов и символов" />
 
         <Preference
             android:key="about"
             android:title="О приложении"
-            android:summary="VulpineNotes - заметки с поддержкой Markdown" />
+            android:summary="Версия 1.0.0" />
 
     </PreferenceCategory>
 

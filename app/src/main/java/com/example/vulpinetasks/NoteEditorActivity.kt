@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.graphics.Rect
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -39,6 +40,7 @@ class NoteEditorActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityNoteEditorBinding
     private lateinit var tokenManager: TokenManager
+    private lateinit var settingsManager: SettingsManager
     private var noteId: String? = null
     private var userId: String? = null
     private var originalContent: String = ""
@@ -52,7 +54,7 @@ class NoteEditorActivity : AppCompatActivity() {
     private var currentHtml = ""
     private var isContentLoaded = false
     private val mainHandler = Handler(Looper.getMainLooper())
-    private lateinit var lineNumbersReceiver: BroadcastReceiver
+    private var settingsReceiver: BroadcastReceiver? = null
 
     companion object {
         private const val TAG = "NOTE_EDITOR"
@@ -65,6 +67,7 @@ class NoteEditorActivity : AppCompatActivity() {
         setContentView(binding.root)
 
         tokenManager = TokenManager(this)
+        settingsManager = SettingsManager(this)
         noteId = intent.getStringExtra("note_id")
         noteTitle = intent.getStringExtra("note_title") ?: "Заметка"
         userId = tokenManager.getUserId()
@@ -79,7 +82,60 @@ class NoteEditorActivity : AppCompatActivity() {
         setupAddChildNoteButton()
         setupFormatButtons()
         setupKeyboardListener()
-        registerLineNumbersReceiver()
+        registerSettingsReceiver()
+        applyKeepScreenOnSetting()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        settingsReceiver?.let { LocalBroadcastManager.getInstance(this).unregisterReceiver(it) }
+    }
+
+    private fun registerSettingsReceiver() {
+        settingsReceiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                if (intent?.action == SettingsManager.ACTION_SETTINGS_CHANGED) {
+                    applyKeepScreenOnSetting()
+                    applyWebViewStyles()
+                }
+            }
+        }
+        LocalBroadcastManager.getInstance(this).registerReceiver(
+            settingsReceiver!!,
+            IntentFilter(SettingsManager.ACTION_SETTINGS_CHANGED)
+        )
+    }
+
+    private fun applyKeepScreenOnSetting() {
+        if (settingsManager.isKeepScreenOn()) {
+            window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        } else {
+            window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+    }
+
+    private fun applyWebViewStyles() {
+        // Применяем настройку переноса слов через CSS
+        val wordWrapStyle = if (settingsManager.isWordWrapEnabled()) {
+            "word-wrap: break-word; white-space: normal;"
+        } else {
+            "word-wrap: normal; white-space: nowrap;"
+        }
+
+        val js = """
+            javascript:(function() {
+                var style = document.createElement('style');
+                style.innerHTML = `
+                    body {
+                        $wordWrapStyle
+                        overflow-x: auto;
+                    }
+                `;
+                document.head.appendChild(style);
+            })();
+        """.trimIndent()
+
+        binding.noteWebview.loadUrl(js)
     }
 
     private fun setupWebView() {
@@ -98,78 +154,79 @@ class NoteEditorActivity : AppCompatActivity() {
             webViewClient = object : WebViewClient() {
                 override fun onPageFinished(view: WebView?, url: String?) {
                     super.onPageFinished(view, url)
-
-                    // Включаем редактирование
                     view?.loadUrl("javascript:document.body.contentEditable = true;")
                     view?.loadUrl("javascript:document.body.focus();")
-
                     isContentLoaded = true
-                    applyLineNumbers()
 
-                    // Улучшаем видимость курсора и добавляем автопрокрутку
-                    val cursorJs = """
-                        javascript:(function() {
-                            // Прокрутка к позиции курсора
-                            function scrollToCursor() {
-                                var selection = window.getSelection();
-                                if (selection.rangeCount > 0) {
-                                    var range = selection.getRangeAt(0);
-                                    var rect = range.getBoundingClientRect();
-                                    if (rect) {
-                                        var targetScroll = rect.top + window.scrollY - 100;
-                                        window.scrollTo({ top: targetScroll, behavior: 'smooth' });
-                                    }
-                                }
-                            }
-                            
-                            // Отслеживаем изменения позиции курсора
-                            document.addEventListener('selectionchange', function() {
-                                scrollToCursor();
-                            });
-                            
-                            // Отслеживаем ввод текста
-                            document.addEventListener('input', function() {
-                                setTimeout(scrollToCursor, 10);
-                            });
-                            
-                            // Отслеживаем нажатия клавиш
-                            document.addEventListener('keyup', function(e) {
-                                setTimeout(scrollToCursor, 10);
-                            });
-                            
-                            // Отслеживаем касания на мобильных устройствах
-                            document.addEventListener('touchend', function() {
-                                setTimeout(scrollToCursor, 100);
-                            });
-                            
-                            // Улучшаем видимость курсора
-                            var style = document.createElement('style');
-                            style.innerHTML = `
-                                [contenteditable="true"] {
-                                    caret-color: #2196F3 !important;
-                                }
-                                [contenteditable="true"]:focus {
-                                    outline: none;
-                                }
-                            `;
-                            document.head.appendChild(style);
-                        })()
-                    """.trimIndent()
+                    // Применяем CSS стили
+                    applyWebViewStyles()
 
-                    view?.loadUrl(cursorJs)
+                    // Применяем настройку прокрутки к курсору
+                    if (settingsManager.isScrollToCursorEnabled()) {
+                        applyScrollToCursorJs()
+                    }
+
+                    applyAutoCapitalizeJs()
                 }
             }
-
             webChromeClient = WebChromeClient()
-
             isFocusable = true
             isFocusableInTouchMode = true
             requestFocus()
         }
     }
 
+    private fun applyScrollToCursorJs() {
+        val cursorJs = """
+            javascript:(function() {
+                function scrollToCursor() {
+                    var selection = window.getSelection();
+                    if (selection.rangeCount > 0) {
+                        var range = selection.getRangeAt(0);
+                        var rect = range.getBoundingClientRect();
+                        if (rect) {
+                            var targetScroll = rect.top + window.scrollY - 100;
+                            window.scrollTo({ top: targetScroll, behavior: 'smooth' });
+                        }
+                    }
+                }
+                document.addEventListener('selectionchange', function() { scrollToCursor(); });
+                document.addEventListener('input', function() { setTimeout(scrollToCursor, 10); });
+                document.addEventListener('keyup', function(e) { setTimeout(scrollToCursor, 10); });
+                document.addEventListener('touchend', function() { setTimeout(scrollToCursor, 100); });
+            })()
+        """.trimIndent()
+        binding.noteWebview.loadUrl(cursorJs)
+    }
+
+    private fun applyAutoCapitalizeJs() {
+        if (settingsManager.isAutoCapitalizeEnabled()) {
+            val autoCapitalizeJs = """
+                javascript:(function() {
+                    document.addEventListener('input', function(e) {
+                        var selection = window.getSelection();
+                        if (selection.rangeCount > 0) {
+                            var range = selection.getRangeAt(0);
+                            var node = range.startContainer;
+                            if (node.nodeType === 3 && node.textContent.length === 1) {
+                                var text = node.textContent;
+                                if (text.match(/[a-zа-я]/)) {
+                                    node.textContent = text.toUpperCase();
+                                    range.setStart(node, 1);
+                                    range.collapse(true);
+                                    selection.removeAllRanges();
+                                    selection.addRange(range);
+                                }
+                            }
+                        }
+                    });
+                })()
+            """.trimIndent()
+            binding.noteWebview.loadUrl(autoCapitalizeJs)
+        }
+    }
+
     private fun setupKeyboardListener() {
-        // Сохраняем исходные позиции
         var originalFabBottomMargin = 200
         var originalPanelBottomMargin = 8
 
@@ -179,12 +236,9 @@ class NoteEditorActivity : AppCompatActivity() {
                 binding.root.getWindowVisibleDisplayFrame(rect)
                 val screenHeight = binding.root.height
                 val keypadHeight = screenHeight - rect.bottom
-
-                // Фиксированная высота, на которую поднимаются элементы (80dp)
                 val fixedRaiseHeight = 80
 
                 if (keypadHeight > screenHeight * 0.15) {
-                    // Клавиатура открыта - поднимаем элементы на фиксированную высоту
                     val fabParams = binding.fabSave.layoutParams as CoordinatorLayout.LayoutParams
                     fabParams.bottomMargin = originalFabBottomMargin + fixedRaiseHeight + 24
                     binding.fabSave.layoutParams = fabParams
@@ -195,7 +249,6 @@ class NoteEditorActivity : AppCompatActivity() {
 
                     binding.scrollView.setPadding(0, 0, 0, fixedRaiseHeight + 120)
                 } else {
-                    // Клавиатура закрыта - возвращаем на исходные позиции
                     val fabParams = binding.fabSave.layoutParams as CoordinatorLayout.LayoutParams
                     fabParams.bottomMargin = originalFabBottomMargin
                     binding.fabSave.layoutParams = fabParams
@@ -208,93 +261,6 @@ class NoteEditorActivity : AppCompatActivity() {
                 }
             }
         })
-    }
-
-    private fun registerLineNumbersReceiver() {
-        lineNumbersReceiver = object : BroadcastReceiver() {
-            override fun onReceive(context: Context?, intent: Intent?) {
-                if (intent?.action == "LINE_NUMBERS_CHANGED") {
-                    applyLineNumbers()
-                }
-            }
-        }
-        LocalBroadcastManager.getInstance(this).registerReceiver(lineNumbersReceiver, IntentFilter("LINE_NUMBERS_CHANGED"))
-    }
-
-    private fun unregisterLineNumbersReceiver() {
-        try {
-            LocalBroadcastManager.getInstance(this).unregisterReceiver(lineNumbersReceiver)
-        } catch (e: Exception) {
-            // Игнорируем
-        }
-    }
-
-    private fun applyLineNumbers() {
-        if (noteType != "note") return
-
-        val settingsManager = SettingsManager(this)
-        val enableLineNumbers = settingsManager.isLineNumbersEnabled()
-
-        val js = """
-            javascript:(function() {
-                var oldStyle = document.getElementById('line-numbers-style');
-                if (oldStyle) oldStyle.remove();
-                
-                if ($enableLineNumbers) {
-                    var style = document.createElement('style');
-                    style.id = 'line-numbers-style';
-                    style.innerHTML = `
-                        body {
-                            counter-reset: line;
-                            padding-left: 0 !important;
-                        }
-                        .line-numbered {
-                            display: block;
-                            counter-increment: line;
-                            position: relative;
-                            padding-left: 50px;
-                            margin: 0;
-                            min-height: 1.5em;
-                            white-space: pre-wrap;
-                            word-wrap: break-word;
-                        }
-                        .line-numbered:before {
-                            content: counter(line);
-                            position: absolute;
-                            left: 0;
-                            width: 35px;
-                            text-align: right;
-                            color: #999;
-                            font-size: 0.85em;
-                            padding-right: 10px;
-                            border-right: 1px solid #ddd;
-                            user-select: none;
-                        }
-                    `;
-                    document.head.appendChild(style);
-                    
-                    var body = document.body;
-                    var html = body.innerHTML;
-                    var lines = html.split('<br>');
-                    var newHtml = '';
-                    for (var i = 0; i < lines.length; i++) {
-                        var lineContent = lines[i];
-                        if (lineContent.trim() === '') {
-                            lineContent = '<br>';
-                        }
-                        newHtml += '<div class="line-numbered">' + lineContent + '</div>';
-                    }
-                    body.innerHTML = newHtml;
-                } else {
-                    var body = document.body;
-                    var html = body.innerHTML;
-                    var newHtml = html.replace(/<div class="line-numbered">(.*?)<\/div>/g, '$1');
-                    body.innerHTML = newHtml;
-                }
-            })()
-        """.trimIndent()
-
-        binding.noteWebview.loadUrl(js)
     }
 
     inner class WebAppInterface {
@@ -386,8 +352,6 @@ class NoteEditorActivity : AppCompatActivity() {
             scheduleAutoSaveForNote()
         }
         binding.btnTable.setOnClickListener { showTableDialog() }
-
-        // Добавляем обработчик для кнопки удаления таблицы
         binding.btnDeleteTable.setOnClickListener { showTableOptionsDialog() }
     }
 
@@ -424,7 +388,6 @@ class NoteEditorActivity : AppCompatActivity() {
                 }
             })();
         """.trimIndent()
-
         execJs(js)
     }
 
@@ -437,18 +400,10 @@ class NoteEditorActivity : AppCompatActivity() {
                         Android.showToast("Установите курсор внутрь таблицы");
                         return;
                     }
-
                     var range = selection.getRangeAt(0);
                     var node = range.startContainer;
-                    
-                    // Если курсор внутри текстового узла
-                    if (node.nodeType === 3) {
-                        node = node.parentNode;
-                    }
-                    
+                    if (node.nodeType === 3) node = node.parentNode;
                     var table = null;
-                    
-                    // Поиск TABLE вверх по DOM
                     while (node && node !== document.body) {
                         if (node.nodeType === 1 && node.tagName && node.tagName.toUpperCase() === 'TABLE') {
                             table = node;
@@ -456,45 +411,31 @@ class NoteEditorActivity : AppCompatActivity() {
                         }
                         node = node.parentNode;
                     }
-                    
                     if (!table) {
                         Android.showToast("Таблица не найдена");
                         return;
                     }
-                    
                     var parent = table.parentNode;
                     if (!parent) {
                         Android.showToast("Ошибка DOM");
                         return;
                     }
-                    
-                    // Создаем новый параграф
                     var paragraph = document.createElement('p');
                     paragraph.innerHTML = '<br>';
-                    
-                    // Вставляем параграф на место таблицы
                     parent.insertBefore(paragraph, table);
-                    
-                    // Удаляем таблицу
                     table.remove();
-                    
-                    // Устанавливаем курсор в новый параграф
                     var newRange = document.createRange();
                     newRange.setStart(paragraph, 0);
                     newRange.collapse(true);
                     selection.removeAllRanges();
                     selection.addRange(newRange);
-                    
-                    // Триггерим событие input для автосохранения
                     document.body.dispatchEvent(new Event('input', { bubbles: true }));
                     Android.showToast("Таблица удалена");
-                    
                 } catch(e) {
                     Android.showToast("Ошибка: " + e.message);
                 }
             })();
         """.trimIndent()
-
         execJs(js)
         scheduleAutoSaveForNote()
     }
@@ -508,18 +449,10 @@ class NoteEditorActivity : AppCompatActivity() {
                         Android.showToast("Установите курсор внутрь таблицы");
                         return;
                     }
-
                     var range = selection.getRangeAt(0);
                     var node = range.startContainer;
-                    
-                    // Если курсор внутри текстового узла
-                    if (node.nodeType === 3) {
-                        node = node.parentNode;
-                    }
-                    
+                    if (node.nodeType === 3) node = node.parentNode;
                     var table = null;
-                    
-                    // Поиск TABLE вверх по DOM
                     while (node && node !== document.body) {
                         if (node.nodeType === 1 && node.tagName && node.tagName.toUpperCase() === 'TABLE') {
                             table = node;
@@ -527,33 +460,25 @@ class NoteEditorActivity : AppCompatActivity() {
                         }
                         node = node.parentNode;
                     }
-                    
                     if (!table) {
                         Android.showToast("Таблица не найдена");
                         return;
                     }
-                    
-                    // Очищаем содержимое ячеек
                     var cells = table.querySelectorAll('td');
                     for (var i = 0; i < cells.length; i++) {
                         cells[i].innerHTML = '';
                     }
-                    
-                    // Восстанавливаем заголовки
                     var headers = table.querySelectorAll('th');
                     for (var i = 0; i < headers.length; i++) {
                         headers[i].innerHTML = 'Заголовок ' + (i + 1);
                     }
-                    
                     document.body.dispatchEvent(new Event('input', { bubbles: true }));
                     Android.showToast("Содержимое таблицы очищено");
-                    
                 } catch(e) {
                     Android.showToast("Ошибка: " + e.message);
                 }
             })();
         """.trimIndent()
-
         execJs(js)
         scheduleAutoSaveForNote()
     }
@@ -573,7 +498,7 @@ class NoteEditorActivity : AppCompatActivity() {
     }
 
     private fun scheduleAutoSaveForNote() {
-        if (noteType != "task" && isContentLoaded) {
+        if (noteType != "task" && isContentLoaded && settingsManager.isAutoSaveEnabled()) {
             saveJob?.cancel()
             saveJob = lifecycleScope.launch {
                 delay(SAVE_DELAY_MS)
@@ -613,15 +538,13 @@ class NoteEditorActivity : AppCompatActivity() {
         val sb = StringBuilder()
         sb.append("<div style='overflow-x: auto; margin: 8px 0;'>")
         sb.append("<table style='border-collapse: collapse; width: 100%; font-family: sans-serif; border: 1px solid #ddd;'>")
-
         sb.append("<thead>")
         sb.append("<tr style='background-color: #2196F3;'>")
         for (c in 0 until cols) {
             sb.append("<th style='border: 1px solid #ddd; padding: 8px; text-align: left; color: white;'>Заголовок ${c + 1}</th>")
         }
-        sb.append("</tr>")
+        sb.append("<tr>")
         sb.append("</thead>")
-
         sb.append("<tbody>")
         for (r in 0 until rows - 1) {
             sb.append("<tr>")
@@ -631,7 +554,6 @@ class NoteEditorActivity : AppCompatActivity() {
             sb.append("</tr>")
         }
         sb.append("</tbody>")
-
         sb.append("</table>")
         sb.append("</div>")
         return sb.toString()
@@ -640,7 +562,6 @@ class NoteEditorActivity : AppCompatActivity() {
     private fun showTableDialog() {
         val builder = AlertDialog.Builder(this)
         val view = layoutInflater.inflate(R.layout.dialog_table_config, null)
-
         val seekBarRows = view.findViewById<android.widget.SeekBar>(R.id.seekBarRows)
         val seekBarCols = view.findViewById<android.widget.SeekBar>(R.id.seekBarCols)
         val tvRows = view.findViewById<android.widget.TextView>(R.id.tvRows)
@@ -648,7 +569,6 @@ class NoteEditorActivity : AppCompatActivity() {
 
         seekBarRows.max = 6
         seekBarCols.max = 5
-
         var rows = 2
         var cols = 2
 
@@ -695,7 +615,6 @@ class NoteEditorActivity : AppCompatActivity() {
                 scheduleAutoSave()
             }
         )
-
         binding.subtasksRecyclerView.layoutManager = LinearLayoutManager(this)
         binding.subtasksRecyclerView.adapter = subtasksAdapter
     }
@@ -752,22 +671,13 @@ class NoteEditorActivity : AppCompatActivity() {
                     if (noteId != null) {
                         AppGraph.notesRepository.removeParentRelation(childNote.id, noteId!!)
                         loadChildNotes()
-                        Toast.makeText(
-                            this@NoteEditorActivity,
-                            "Заметка отвязана",
-                            Toast.LENGTH_SHORT
-                        ).show()
+                        Toast.makeText(this@NoteEditorActivity, "Заметка отвязана", Toast.LENGTH_SHORT).show()
                     }
                 }
             }
         )
-
         binding.childNotesRecyclerView.apply {
-            layoutManager = LinearLayoutManager(
-                this@NoteEditorActivity,
-                LinearLayoutManager.HORIZONTAL,
-                false
-            )
+            layoutManager = LinearLayoutManager(this@NoteEditorActivity, LinearLayoutManager.HORIZONTAL, false)
             adapter = childNotesAdapter
             childNotesAdapter?.submitList(emptyList())
         }
@@ -779,11 +689,7 @@ class NoteEditorActivity : AppCompatActivity() {
                 val childNotes = AppGraph.notesRepository.getChildNotes(noteId!!, userId!!)
                 childNotesAdapter?.submitList(childNotes)
                 binding.tagsSectionCard.visibility = View.VISIBLE
-                binding.tagsTitle.text = if (childNotes.isEmpty()) {
-                    "Вложенные заметки (0)"
-                } else {
-                    "Вложенные заметки (${childNotes.size})"
-                }
+                binding.tagsTitle.text = if (childNotes.isEmpty()) "Вложенные заметки (0)" else "Вложенные заметки (${childNotes.size})"
             }
         }
     }
@@ -798,25 +704,16 @@ class NoteEditorActivity : AppCompatActivity() {
         lifecycleScope.launch {
             val currentNoteId = noteId ?: return@launch
             val currentUserId = userId ?: return@launch
-
             val allNotes = AppGraph.notesRepository.getAllNotes(currentUserId)
             val existingChildIds = AppGraph.notesRepository.getChildNotesIds(currentNoteId)
-
-            val availableNotes = allNotes.filter { note ->
-                note.id != currentNoteId && note.id !in existingChildIds
-            }
+            val availableNotes = allNotes.filter { note -> note.id != currentNoteId && note.id !in existingChildIds }
 
             if (availableNotes.isEmpty()) {
-                Toast.makeText(
-                    this@NoteEditorActivity,
-                    "Нет доступных заметок для добавления",
-                    Toast.LENGTH_LONG
-                ).show()
+                Toast.makeText(this@NoteEditorActivity, "Нет доступных заметок для добавления", Toast.LENGTH_LONG).show()
                 return@launch
             }
 
             val titles = availableNotes.map { it.title }.toTypedArray()
-
             AlertDialog.Builder(this@NoteEditorActivity)
                 .setTitle("Выберите заметку")
                 .setItems(titles) { _, which ->
@@ -824,11 +721,7 @@ class NoteEditorActivity : AppCompatActivity() {
                     lifecycleScope.launch {
                         AppGraph.notesRepository.addParentRelation(selectedNote.id, currentNoteId)
                         loadChildNotes()
-                        Toast.makeText(
-                            this@NoteEditorActivity,
-                            "Заметка добавлена: ${selectedNote.title}",
-                            Toast.LENGTH_SHORT
-                        ).show()
+                        Toast.makeText(this@NoteEditorActivity, "Заметка добавлена: ${selectedNote.title}", Toast.LENGTH_SHORT).show()
                     }
                 }
                 .setNegativeButton("Отмена", null)
@@ -936,13 +829,7 @@ class NoteEditorActivity : AppCompatActivity() {
             subtasks.clear()
             for (i in 0 until jsonArray.length()) {
                 val obj = jsonArray.getJSONObject(i)
-                subtasks.add(
-                    SubTaskDto(
-                        id = obj.getString("id"),
-                        title = obj.getString("title"),
-                        isCompleted = obj.getBoolean("isCompleted")
-                    )
-                )
+                subtasks.add(SubTaskDto(id = obj.getString("id"), title = obj.getString("title"), isCompleted = obj.getBoolean("isCompleted")))
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error parsing subtasks JSON", e)
@@ -964,7 +851,6 @@ class NoteEditorActivity : AppCompatActivity() {
 
     private suspend fun saveContentToDatabase(newContent: String) {
         if (isSaving || newContent == originalContent) return
-
         isSaving = true
         try {
             if (noteId != null && userId != null) {
@@ -981,7 +867,6 @@ class NoteEditorActivity : AppCompatActivity() {
 
     private fun scheduleAutoSave() {
         if (noteType != "task") return
-
         saveJob?.cancel()
         saveJob = lifecycleScope.launch {
             delay(SAVE_DELAY_MS)
@@ -991,15 +876,8 @@ class NoteEditorActivity : AppCompatActivity() {
 
     private suspend fun autoSaveContent() {
         if (isSaving) return
-
-        val newContent = if (noteType == "task") {
-            saveSubtasksToJson()
-        } else {
-            currentHtml
-        }
-
+        val newContent = if (noteType == "task") saveSubtasksToJson() else currentHtml
         if (newContent == originalContent) return
-
         isSaving = true
         try {
             if (noteId != null && userId != null) {
@@ -1021,7 +899,6 @@ class NoteEditorActivity : AppCompatActivity() {
 
     private fun saveAndClose() {
         saveJob?.cancel()
-
         if (noteType == "task") {
             val newContent = saveSubtasksToJson()
             if (newContent != originalContent) {
@@ -1059,7 +936,7 @@ class NoteEditorActivity : AppCompatActivity() {
             lifecycleScope.launch { autoSaveContent() }
         } else {
             saveJob?.cancel()
-            if (isContentLoaded) {
+            if (isContentLoaded && settingsManager.isAutoSaveEnabled()) {
                 binding.noteWebview.loadUrl("javascript:Android.setContent(document.body.innerHTML);")
                 mainHandler.postDelayed({
                     if (currentHtml != originalContent && currentHtml.isNotBlank()) {
@@ -1070,11 +947,6 @@ class NoteEditorActivity : AppCompatActivity() {
                 }, 200)
             }
         }
-    }
-
-    override fun onDestroy() {
-        super.onDestroy()
-        unregisterLineNumbersReceiver()
     }
 
     override fun onBackPressed() {

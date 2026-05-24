@@ -50,26 +50,7 @@ data class NoteDto(
     val isDeleted: Boolean = false
 ) {
     // Метод для подсчета символов (без HTML тегов)
-    fun getCharacterCount(): Int {
-        return if (type == "task") {
-            // Для задач считаем подзадачи
-            try {
-                val jsonArray = JSONArray(content)
-                jsonArray.length()
-            } catch (e: Exception) {
-                0
-            }
-        } else {
-            // Для заметок считаем символы без HTML тегов
-            content
-                .replace(Regex("<[^>]*>"), "") // Удаляем HTML теги
-                .replace(Regex("\\s+"), " ") // Заменяем множественные пробелы
-                .trim()
-                .length
-        }
-    }
-
-    // Метод для подсчета слов
+    // Добавьте эти методы в NoteDto.kt
     fun getWordCount(): Int {
         if (type == "task") return 0
 
@@ -80,6 +61,16 @@ data class NoteDto(
 
         if (cleanText.isEmpty()) return 0
         return cleanText.split(Regex("\\s+")).filter { it.isNotEmpty() }.size
+    }
+
+    fun getCharacterCount(): Int {
+        if (type == "task") return 0
+
+        return content
+            .replace(Regex("<[^>]*>"), "")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+            .length
     }
 
     // Метод для получения статистики подзадач

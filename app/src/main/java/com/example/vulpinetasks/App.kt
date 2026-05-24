@@ -11,9 +11,5 @@ class App : Application() {
 
         // Инициализируем базу данных
         AppGraph.init(this)
-
-        // Применяем сохранённую тему
-        val settingsManager = SettingsManager(this)
-        settingsManager.applySavedTheme()
     }
 }

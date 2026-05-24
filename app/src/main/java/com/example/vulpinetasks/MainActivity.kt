@@ -2,7 +2,10 @@ package com.example.vulpinetasks
 
 import android.animation.ObjectAnimator
 import android.app.AlertDialog
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.os.Bundle
 import android.view.Menu
 import android.view.MenuItem
@@ -15,12 +18,14 @@ import androidx.appcompat.widget.SearchView
 import androidx.appcompat.widget.Toolbar
 import androidx.core.view.GravityCompat
 import androidx.lifecycle.lifecycleScope
+import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.example.vulpinetasks.backend.NoteDto
 import com.example.vulpinetasks.backend.TokenManager
 import com.example.vulpinetasks.databinding.ActivityMainBinding
 import com.example.vulpinetasks.room.AppGraph
 import com.example.vulpinetasks.util.NetworkUtil
+import com.example.vulpinetasks.utils.SettingsManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
@@ -32,31 +37,37 @@ class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
     private lateinit var adapter: NotesAdapter
     private lateinit var tokenManager: TokenManager
+    private lateinit var settingsManager: SettingsManager
     private var syncAnimator: ObjectAnimator? = null
     private var isSyncing = false
+    private var settingsReceiver: BroadcastReceiver? = null
 
     private val repo get() = AppGraph.notesRepository
     private lateinit var userId: String
 
-    // Состояния для фильтрации и поиска
     private val searchQuery = MutableStateFlow("")
     private val sortType = MutableStateFlow(SortType.DATE_DESC)
     private val allNotes = mutableListOf<NoteDto>()
 
     enum class SortType {
-        DATE_DESC,      // Сначала новые
-        DATE_ASC,       // Сначала старые
-        ALPHABETICAL_ASC,   // А-Я
-        ALPHABETICAL_DESC   // Я-А
+        DATE_DESC, DATE_ASC, ALPHABETICAL_ASC, ALPHABETICAL_DESC
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        settingsManager = SettingsManager(this)
+        if (settingsManager.isDarkMode()) {
+            setTheme(R.style.Theme_VulpineTasks_Dark)
+        } else {
+            setTheme(R.style.Theme_VulpineTasks)
+        }
+
         super.onCreate(savedInstanceState)
 
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
         tokenManager = TokenManager(this)
+        settingsManager = SettingsManager(this)
         userId = tokenManager.getUserId() ?: "guest_${System.currentTimeMillis()}"
         tokenManager.saveUserId(userId)
 
@@ -66,6 +77,8 @@ class MainActivity : AppCompatActivity() {
         setupSearchAndFilter()
         setupSyncButton()
         updateNavHeader()
+
+        registerSettingsReceiver()
 
         if (!tokenManager.isGuest()) {
             lifecycleScope.launch {
@@ -79,6 +92,8 @@ class MainActivity : AppCompatActivity() {
         binding.addNoteButton.setOnClickListener {
             showTypeSelectionDialog()
         }
+
+        applyKeepScreenOnSetting()
     }
 
     override fun onResume() {
@@ -89,11 +104,46 @@ class MainActivity : AppCompatActivity() {
                 checkUnsyncedNotes()
             }
         }
+        applyFiltersAndSort()
+        applyKeepScreenOnSetting()
+        applyCompactViewSetting()
     }
 
     override fun onDestroy() {
         super.onDestroy()
         syncAnimator?.cancel()
+        settingsReceiver?.let { LocalBroadcastManager.getInstance(this).unregisterReceiver(it) }
+    }
+
+    private fun registerSettingsReceiver() {
+        settingsReceiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                if (intent?.action == SettingsManager.ACTION_SETTINGS_CHANGED) {
+                    applyFiltersAndSort()
+                    applyCompactViewSetting()
+                    applyKeepScreenOnSetting()
+                    // Обновляем адаптер
+                    adapter.notifyDataSetChanged()
+                }
+            }
+        }
+        LocalBroadcastManager.getInstance(this).registerReceiver(
+            settingsReceiver!!,
+            IntentFilter(SettingsManager.ACTION_SETTINGS_CHANGED)
+        )
+    }
+
+    private fun applyKeepScreenOnSetting() {
+        if (settingsManager.isKeepScreenOn()) {
+            window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        } else {
+            window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+    }
+
+    private fun applyCompactViewSetting() {
+        val padding = if (settingsManager.isCompactViewEnabled()) 4 else 16
+        binding.notesRecyclerView.setPadding(padding, padding, padding, padding)
     }
 
     private fun setupSyncButton() {
@@ -106,10 +156,8 @@ class MainActivity : AppCompatActivity() {
         try {
             startSyncAnimation()
             isSyncing = true
-
             repo.fetchFromServer(userId)
             repo.syncUnsyncedNotes(userId)
-
             checkUnsyncedNotes()
         } catch (e: Exception) {
             e.printStackTrace()
@@ -139,21 +187,11 @@ class MainActivity : AppCompatActivity() {
             try {
                 startSyncAnimation()
                 isSyncing = true
-
                 Toast.makeText(this@MainActivity, "Синхронизация началась...", Toast.LENGTH_SHORT).show()
-
-                // Сначала отправляем несинхронизированные заметки на сервер
                 repo.syncUnsyncedNotes(userId)
-
-                // Затем загружаем обновления с сервера
                 repo.fetchFromServer(userId)
-
-                // Синхронизируем локальные изменения
                 repo.syncLocalChangesToServer(userId)
-
-                // Проверяем остались ли несинхронизированные заметки
                 checkUnsyncedNotes()
-
                 Toast.makeText(this@MainActivity, "Синхронизация завершена успешно", Toast.LENGTH_SHORT).show()
             } catch (e: Exception) {
                 Toast.makeText(this@MainActivity, "Ошибка синхронизации: ${e.message}", Toast.LENGTH_SHORT).show()
@@ -184,9 +222,7 @@ class MainActivity : AppCompatActivity() {
             updateSyncIndicator(true)
             return
         }
-
         try {
-            // Проверяем наличие несинхронизированных заметок через репозиторий
             val hasUnsynced = repo.hasUnsyncedNotes(userId)
             updateSyncIndicator(!hasUnsynced)
         } catch (e: Exception) {
@@ -208,12 +244,9 @@ class MainActivity : AppCompatActivity() {
         try {
             val headerView = binding.navView.getHeaderView(0)
             val userEmailView = headerView.findViewById<TextView>(R.id.nav_user_email)
-
             if (tokenManager.getToken() != null) {
                 userEmailView.text = tokenManager.getEmail() ?: "user@example.com"
                 userEmailView.visibility = android.view.View.VISIBLE
-
-                val creationDate = tokenManager.getAccountCreationDate()
             } else if (tokenManager.isGuest()) {
                 userEmailView.text = "Гостевой режим"
                 userEmailView.visibility = android.view.View.VISIBLE
@@ -268,11 +301,13 @@ class MainActivity : AppCompatActivity() {
             },
             onRename = { note ->
                 showRenameDialog(note)
-            }
+            },
+            settingsManager = settingsManager
         )
 
         binding.notesRecyclerView.layoutManager = LinearLayoutManager(this)
         binding.notesRecyclerView.adapter = adapter
+        applyCompactViewSetting()
     }
 
     private fun observeNotes() {
@@ -298,23 +333,18 @@ class MainActivity : AppCompatActivity() {
 
     private fun filterAndSortNotes(query: String, sort: SortType): List<NoteDto> {
         var filtered = allNotes.toList()
-
-        // Фильтрация по поисковому запросу
         if (query.isNotEmpty()) {
             filtered = filtered.filter { note ->
                 note.title.contains(query, ignoreCase = true) ||
                         note.content.contains(query, ignoreCase = true)
             }
         }
-
-        // Сортировка
         filtered = when (sort) {
             SortType.DATE_DESC -> filtered.sortedByDescending { it.updatedAt }
             SortType.DATE_ASC -> filtered.sortedBy { it.updatedAt }
             SortType.ALPHABETICAL_ASC -> filtered.sortedBy { it.title.lowercase() }
             SortType.ALPHABETICAL_DESC -> filtered.sortedByDescending { it.title.lowercase() }
         }
-
         return filtered
     }
 
@@ -326,34 +356,26 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
         menuInflater.inflate(R.menu.main_menu, menu)
-
-        // Настройка SearchView
         val searchItem = menu.findItem(R.id.action_search)
         val searchView = searchItem.actionView as SearchView
         searchView.queryHint = "Поиск по заголовку или содержанию"
-
         searchView.setOnQueryTextListener(object : SearchView.OnQueryTextListener {
             override fun onQueryTextSubmit(query: String): Boolean {
                 searchQuery.value = query
                 return true
             }
-
             override fun onQueryTextChange(newText: String): Boolean {
                 searchQuery.value = newText
                 return true
             }
         })
-
-        // Обработчик кнопки "Очистить поиск"
         searchItem.setOnActionExpandListener(object : MenuItem.OnActionExpandListener {
             override fun onMenuItemActionExpand(item: MenuItem): Boolean = true
-
             override fun onMenuItemActionCollapse(item: MenuItem): Boolean {
                 searchQuery.value = ""
                 return true
             }
         })
-
         return true
     }
 
@@ -368,20 +390,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showFilterDialog() {
-        val sortOptions = arrayOf(
-            "📅 Сначала новые",
-            "📅 Сначала старые",
-            "🔤 По алфавиту (А-Я)",
-            "🔤 По алфавиту (Я-А)"
-        )
-
+        val sortOptions = arrayOf("📅 Сначала новые", "📅 Сначала старые", "🔤 По алфавиту (А-Я)", "🔤 По алфавиту (Я-А)")
         val currentSelection = when (sortType.value) {
             SortType.DATE_DESC -> 0
             SortType.DATE_ASC -> 1
             SortType.ALPHABETICAL_ASC -> 2
             SortType.ALPHABETICAL_DESC -> 3
         }
-
         AlertDialog.Builder(this)
             .setTitle("Сортировка заметок")
             .setSingleChoiceItems(sortOptions, currentSelection) { _, which ->
@@ -404,11 +419,7 @@ class MainActivity : AppCompatActivity() {
     private fun updateEmptyView(isEmpty: Boolean) {
         if (isEmpty) {
             binding.emptyView.visibility = android.view.View.VISIBLE
-            binding.emptyText.text = if (searchQuery.value.isNotEmpty()) {
-                "Ничего не найдено"
-            } else {
-                "Нет заметок"
-            }
+            binding.emptyText.text = if (searchQuery.value.isNotEmpty()) "Ничего не найдено" else "Нет заметок"
         } else {
             binding.emptyView.visibility = android.view.View.GONE
         }
@@ -418,18 +429,11 @@ class MainActivity : AppCompatActivity() {
         binding.menuButton.setOnClickListener {
             binding.drawerLayout.openDrawer(GravityCompat.START)
         }
-
         binding.navView.setNavigationItemSelectedListener { item ->
             when (item.itemId) {
-                R.id.nav_login -> {
-                    startActivity(Intent(this, LoginActivity::class.java))
-                }
-                R.id.nav_trash -> {
-                    startActivity(Intent(this, TrashActivity::class.java))
-                }
-                R.id.nav_settings -> {
-                    startActivity(Intent(this, SettingsActivity::class.java))
-                }
+                R.id.nav_login -> startActivity(Intent(this, LoginActivity::class.java))
+                R.id.nav_trash -> startActivity(Intent(this, TrashActivity::class.java))
+                R.id.nav_settings -> startActivity(Intent(this, SettingsActivity::class.java))
             }
             binding.drawerLayout.closeDrawer(GravityCompat.START)
             true
@@ -438,7 +442,6 @@ class MainActivity : AppCompatActivity() {
 
     private fun showTypeSelectionDialog() {
         val options = arrayOf("📝 Заметка", "✅ Задача")
-
         AlertDialog.Builder(this)
             .setTitle("Создать")
             .setItems(options) { _, which ->
@@ -454,6 +457,9 @@ class MainActivity : AppCompatActivity() {
     private fun showCreateNoteDialog(type: String) {
         val input = EditText(this)
         input.hint = if (type == "note") "Введите заголовок заметки" else "Введите название задачи"
+        val defaultTitle = settingsManager.getDefaultNoteTitle()
+        input.setText(defaultTitle)
+        input.selectAll()
 
         AlertDialog.Builder(this)
             .setTitle(if (type == "note") "Новая заметка" else "Новая задача")
@@ -464,24 +470,11 @@ class MainActivity : AppCompatActivity() {
                     toast("Заголовок не может быть пустым")
                     return@setPositiveButton
                 }
-
                 lifecycleScope.launch {
                     try {
-                        val defaultContent = if (type == "note") {
-                            "# $text\n\n"
-                        } else {
-                            "[]"
-                        }
-
-                        repo.createNote(
-                            title = text,
-                            type = type,
-                            userId = userId,
-                            isOnline = NetworkUtil.isOnline(this@MainActivity)
-                        )
-
+                        val defaultContent = if (type == "note") "# $text\n\n" else "[]"
+                        repo.createNote(title = text, type = type, userId = userId, isOnline = NetworkUtil.isOnline(this@MainActivity))
                         kotlinx.coroutines.delay(100)
-
                         val createdNote = getNoteByTitle(text)
                         if (createdNote != null) {
                             repo.updateNoteContent(createdNote.id, userId, defaultContent)
@@ -489,7 +482,6 @@ class MainActivity : AppCompatActivity() {
                         } else {
                             toast(if (type == "note") "Заметка создана" else "Задача создана")
                         }
-
                         if (!tokenManager.isGuest() && NetworkUtil.isOnline(this@MainActivity)) {
                             checkUnsyncedNotes()
                         }
@@ -524,12 +516,10 @@ class MainActivity : AppCompatActivity() {
                     toast("Название не может быть пустым")
                     return@setPositiveButton
                 }
-
                 if (newTitle == note.title) {
                     toast("Название не изменено")
                     return@setPositiveButton
                 }
-
                 lifecycleScope.launch {
                     try {
                         repo.updateNoteTitle(note.id, newTitle)
@@ -549,13 +539,11 @@ class MainActivity : AppCompatActivity() {
 
     private fun showNoteInfoDialog(note: NoteDto) {
         val dialogView = layoutInflater.inflate(R.layout.dialog_note_info, null)
-
         val titleText = dialogView.findViewById<TextView>(R.id.info_title)
         val createdAtText = dialogView.findViewById<TextView>(R.id.info_created_at)
         val updatedAtText = dialogView.findViewById<TextView>(R.id.info_updated_at)
         val childCountText = dialogView.findViewById<TextView>(R.id.info_child_count)
         val parentCountText = dialogView.findViewById<TextView>(R.id.info_parent_count)
-
         val dateFormat = SimpleDateFormat("dd.MM.yyyy HH:mm:ss", Locale.getDefault())
 
         titleText.text = note.title
@@ -567,14 +555,12 @@ class MainActivity : AppCompatActivity() {
             .setView(dialogView)
             .setPositiveButton("Закрыть", null)
             .create()
-
         dialog.show()
 
         lifecycleScope.launch {
             try {
                 val childCount = repo.getChildNotesIds(note.id).size
                 val parentCount = repo.getParentIdsForNoteInfo(note.id).size
-
                 childCountText.text = childCount.toString()
                 parentCountText.text = parentCount.toString()
             } catch (e: Exception) {

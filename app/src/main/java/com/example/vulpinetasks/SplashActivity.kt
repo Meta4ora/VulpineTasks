@@ -16,13 +16,6 @@ class SplashActivity : AppCompatActivity() {
     private lateinit var appName: TextView
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        val settingsManager = SettingsManager(this)
-        if (settingsManager.isDarkMode()) {
-            setTheme(R.style.Theme_VulpineTasks_Dark)
-        } else {
-            setTheme(R.style.Theme_VulpineTasks)
-        }
-
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_splash)
 
