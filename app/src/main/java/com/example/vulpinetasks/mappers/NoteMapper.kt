@@ -10,7 +10,7 @@ fun NoteEntity.toDto(): NoteDto {
         title = this.title,
         type = this.type,
         content = this.content,
-        parentIds = emptyList(),  // Связи теперь в отдельной таблице
+        parentIds = emptyList(),
         filePath = this.filePath,
         createdAt = this.createdAt,
         updatedAt = this.updatedAt,

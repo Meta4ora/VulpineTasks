@@ -78,7 +78,7 @@ interface NoteDao {
     """)
     suspend fun copyNotesToUser(sourceUserId: String, newUserId: String)
 
-    // ========== Методы для работы со связями (many-to-many) ==========
+    // Методы для работы со связями (many-to-many)
 
     @Query("""
         SELECT n.* FROM notes n

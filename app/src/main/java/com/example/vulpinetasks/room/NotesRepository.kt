@@ -365,9 +365,6 @@ class NotesRepository(
         }
     }
 
-    // ==================== КОРЗИНА ====================
-
-    // Временное хранилище для связей удаленных заметок (на случай восстановления)
     private val deletedRelationsStore = mutableMapOf<String, Triple<List<String>, List<String>, String?>>()
 
     private suspend fun saveRelationsForNote(noteId: String, parentIds: List<String>, childIds: List<String>, serverId: String?) {
@@ -382,10 +379,6 @@ class NotesRepository(
         deletedRelationsStore.clear()
     }
 
-    /**
-     * Перемещение заметки в корзину
-     * НЕ удаляем связи, только помечаем заметку как isDeleted = true
-     */
     suspend fun moveToTrash(noteId: String) {
         val note = dao.getActiveNoteById(noteId) ?: return
 
@@ -397,12 +390,9 @@ class NotesRepository(
         val now = System.currentTimeMillis()
         dao.moveToTrash(note.id, now)
 
-        // ВАЖНО: НЕ удаляем связи! Они остаются в таблице note_relations
-
         if (!tokenManager.isGuest() && note.serverId != null) {
             try {
                 val token = tokenManager.getToken() ?: return
-                // На сервере тоже просто помечаем как удаленную
                 api.updateNote(
                     note.serverId,
                     "Bearer $token",
@@ -415,15 +405,11 @@ class NotesRepository(
         }
     }
 
-    /**
-     * Восстановление заметки из корзины
-     */
     suspend fun restoreFromTrash(noteId: String) {
         val note = dao.getTrashNoteById(noteId) ?: return
 
         val now = System.currentTimeMillis()
 
-        // Просто снимаем флаг isDeleted (связи уже существуют)
         dao.restoreFromTrash(note.id, now)
 
         // Очищаем временное хранилище
@@ -442,7 +428,6 @@ class NotesRepository(
                 // Получаем актуальные parentIds (они не удалялись)
                 val parentIds = dao.getParentIdsForNote(note.id)
 
-                // Просто снимаем флаг isDeleted
                 api.updateNote(
                     note.serverId,
                     "Bearer $token",
@@ -488,14 +473,10 @@ class NotesRepository(
         }
     }
 
-    /**
-     * ПОЛНОЕ удаление заметки (без возможности восстановления)
-     * ТОЛЬКО ЗДЕСЬ удаляем все связи
-     */
     suspend fun deletePermanently(noteId: String) {
         val note = dao.getNoteById(noteId) ?: return
 
-        // НАХОДИМ ВСЕ ЗАМЕТКИ, КОТОРЫЕ ССЫЛАЮТСЯ НА ЭТУ
+        // находим все заметки которые ссылаются на эту
         val referencingNotes = dao.getNotesReferencingParentId(noteId)
 
         referencingNotes.forEach { refNote ->
@@ -629,7 +610,7 @@ class NotesRepository(
         return dao.getAllActiveNotes(userId).map { it.toDto() }
     }
 
-    // ========== МЕТОДЫ ДЛЯ РАБОТЫ СО СВЯЗЯМИ ==========
+    // Методы дял работы со связями
 
     suspend fun getChildNotes(parentId: String, userId: String): List<NoteDto> {
         Log.d(TAG, "getChildNotes: parentId=$parentId, userId=$userId")

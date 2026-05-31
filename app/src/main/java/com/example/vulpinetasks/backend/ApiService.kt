@@ -50,7 +50,6 @@ data class NoteDto(
     val isDeleted: Boolean = false
 ) {
     // Метод для подсчета символов (без HTML тегов)
-    // Добавьте эти методы в NoteDto.kt
     fun getWordCount(): Int {
         if (type == "task") return 0
 
